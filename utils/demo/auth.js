@@ -70,7 +70,7 @@ route('POST', '/api/v1/screen-ads/add', ({ body, files }) => {
     created_at: nowIso(),
   };
   ads.push(ad);
-  return { status: 201, data: { success: true, message: 'Ad added. In the demo it stays for 20 seconds.', data: adRow(ad) } };
+  return { status: 201, data: { success: true, message: 'Ad added. In the demo it stays for 1 hour.', data: adRow(ad) } };
 });
 
 route('PUT', '/api/v1/screen-ads/update/:id', ({ params, body }) => {

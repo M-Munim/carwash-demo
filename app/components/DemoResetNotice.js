@@ -5,7 +5,7 @@ import { Timer } from 'lucide-react';
 
 /**
  * Demo only: after a visitor adds, edits or deletes something, the change
- * stays for 20 seconds (utils/demo/core.js, CHANGE_TTL_MS). This shows the
+ * stays for 1 hour (utils/demo/core.js, CHANGE_TTL_MS). This shows the
  * countdown and reloads the page when the sample data comes back.
  */
 export default function DemoResetNotice() {
@@ -38,6 +38,7 @@ export default function DemoResetNotice() {
 
   if (!resetAt) return null;
   const seconds = Math.max(0, Math.ceil((resetAt - now) / 1000));
+  const left = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
 
   return (
     <div
@@ -47,7 +48,7 @@ export default function DemoResetNotice() {
     >
       <Timer className="h-4 w-4 shrink-0" aria-hidden="true" />
       <span>
-        Demo: your changes are cleared in <strong className="tabular-nums">{seconds}s</strong>
+        Demo: your changes are cleared in <strong className="tabular-nums">{left}</strong>
       </span>
     </div>
   );

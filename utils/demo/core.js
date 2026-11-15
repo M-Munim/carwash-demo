@@ -17,7 +17,7 @@ import { AxiosError } from 'axios';
 const STORAGE_KEY = 'washdesk-demo-db-v2';
 const RESET_AT_KEY = 'washdesk-demo-reset-at';
 /** How long a visitor's changes stay before the sample data comes back. */
-export const CHANGE_TTL_MS = 20 * 1000;
+export const CHANGE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 // ── routes ──────────────────────────────────────────────────
 const routes = [];
