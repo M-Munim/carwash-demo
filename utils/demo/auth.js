@@ -1,6 +1,6 @@
 // Demo: staff logins and the queue screen ads.
 
-import { route, seeder, httpError, nextId, nowIso } from './core';
+import { route, seeder, httpError, nextId, nowIso, changeMade, onDemoReset } from './core';
 
 /** The demo accounts, also shown on the login page. */
 export const DEMO_ACCOUNTS = [
@@ -41,6 +41,8 @@ route('POST', '/api/v1/identity/login', ({ db, body }) => {
 // so they are kept in memory, not in the saved demo data.
 const ads = [];
 let queueSeconds = 45;
+// The 20-second demo reset clears uploaded ads too.
+onDemoReset(() => { ads.length = 0; queueSeconds = 45; });
 
 const adRow = (a) => ({ ...a });
 
@@ -49,6 +51,7 @@ route('GET', '/api/v1/screen-ads/active', () => ({ success: true, data: ads.filt
 route('GET', '/api/v1/screen-ads/settings', () => ({ success: true, data: { queue_seconds: queueSeconds } }));
 route('PUT', '/api/v1/screen-ads/settings', ({ body }) => {
   queueSeconds = Number(body?.queue_seconds) || queueSeconds;
+  changeMade();
   return { success: true, message: 'Settings saved', data: { queue_seconds: queueSeconds } };
 });
 
@@ -67,7 +70,7 @@ route('POST', '/api/v1/screen-ads/add', ({ body, files }) => {
     created_at: nowIso(),
   };
   ads.push(ad);
-  return { status: 201, data: { success: true, message: 'Ad added. In the demo it stays until the page is reloaded.', data: adRow(ad) } };
+  return { status: 201, data: { success: true, message: 'Ad added. In the demo it stays for 20 seconds.', data: adRow(ad) } };
 });
 
 route('PUT', '/api/v1/screen-ads/update/:id', ({ params, body }) => {
@@ -76,6 +79,7 @@ route('PUT', '/api/v1/screen-ads/update/:id', ({ params, body }) => {
   ['title', 'seconds', 'sort_order', 'is_active'].forEach((k) => {
     if (body?.[k] !== undefined) ad[k] = k === 'title' ? body[k] : Number(body[k] === true ? 1 : body[k] === false ? 0 : body[k]);
   });
+  changeMade();
   return { success: true, message: 'Ad updated', data: adRow(ad) };
 });
 
@@ -83,5 +87,6 @@ route('PUT', '/api/v1/screen-ads/delete/:id', ({ params }) => {
   const i = ads.findIndex((a) => String(a.id) === params.id);
   if (i < 0) throw httpError(404, 'Ad not found');
   ads.splice(i, 1);
+  changeMade();
   return { success: true, message: 'Ad deleted' };
 });

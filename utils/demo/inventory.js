@@ -333,51 +333,19 @@ const SUPPLIERS = {
 // flag: 'low' = ends below the alert level, 'out' = ends at 0.
 const SAMPLE_ITEMS = [
   ['Car Shampoo (5 gal drum)', 'CW-001', 'supply', 'Car Wash', 'gallon', 4, 95, null, 'bayline', 0.9, 0.5, 20],
-  ['Snow Foam Concentrate', 'CW-002', 'supply', 'Car Wash', 'gallon', 3, 120, null, 'bayline', 0.6, 0.5, 15],
   ['Tyre Shine Gel', 'CW-003', 'supply', 'Car Wash', 'bottle', 6, 38, null, 'pearl', 1.2, 1, 30, 'low'],
-  ['Glass Cleaner', 'CW-004', 'supply', 'Car Wash', 'bottle', 6, 18, null, 'pearl', 1, 1, 30],
-  ['Microfiber Towels (pack of 10)', 'CW-005', 'supply', 'Car Wash', 'pack', 5, 45, null, 'pearl', 0.35, 1, 15],
-  ['Wash Mitts', 'CW-006', 'supply', 'Car Wash', 'piece', 6, 15, null, 'pearl', 0.2, 1, 12],
   ['Interior Cleaner (APC)', 'CW-007', 'supply', 'Car Wash', 'gallon', 3, 70, null, 'bayline', 0.5, 0.5, 12, 'out'],
-  ['Wheel & Rim Cleaner', 'CW-008', 'supply', 'Car Wash', 'gallon', 2, 85, null, 'bayline', 0.3, 0.5, 10],
-  ['Car Air Freshener', 'CW-009', 'product', 'Car Wash', 'piece', 30, 3.5, 10, 'lusail', 2.5, 1, 150],
   ['Spray Wax (500 ml)', 'CW-010', 'product', 'Car Wash', 'bottle', 8, 22, 45, 'pearl', 0.6, 1, 30],
-  ['Cutting Compound (1 L)', 'PL-001', 'supply', 'Polishing', 'bottle', 2, 110, null, 'gloss', 0.12, 1, 6],
-  ['Finishing Polish (1 L)', 'PL-002', 'supply', 'Polishing', 'bottle', 2, 95, null, 'gloss', 0.12, 1, 6],
-  ['Foam Polishing Pads', 'PL-003', 'supply', 'Polishing', 'pack', 3, 60, null, 'gloss', 0.1, 1, 6, 'low'],
-  ['Clay Bar Kit', 'PL-004', 'supply', 'Polishing', 'piece', 3, 35, null, 'gloss', 0.1, 1, 8],
-  ['Leather Conditioner', 'DT-001', 'supply', 'Detailing', 'bottle', 3, 48, null, 'gloss', 0.15, 1, 8],
-  ['Nano Ceramic Coating Kit', 'DT-002', 'supply', 'Detailing', 'box', 2, 380, null, 'gloss', 0.07, 1, 5],
-  ['Graphene Coating Kit', 'DT-003', 'supply', 'Detailing', 'box', 2, 520, null, 'gloss', 0.05, 1, 4, 'low'],
-  ['Engine Bay Degreaser', 'DT-004', 'supply', 'Detailing', 'can', 4, 28, null, 'bayline', 0.2, 1, 12],
-  ['Odour Removal Fogger', 'DT-005', 'supply', 'Detailing', 'can', 4, 25, null, null, 0.1, 1, 10],
-  ['Nano Ceramic Tint Film', 'WT-001', 'supply', 'Window Tints', 'roll', 2, 650, null, 'tint', 0.05, 1, 4],
-  ['Carbon Tint Film', 'WT-002', 'supply', 'Window Tints', 'roll', 2, 320, null, 'tint', 0.06, 1, 5],
-  ['Tint Slip Solution', 'WT-003', 'supply', 'Window Tints', 'bottle', 3, 20, null, 'tint', 0.12, 1, 10],
   ['Dashboard Cover - Sedan', 'DB-001', 'product', 'Dashboards', 'piece', 4, 55, 120, 'lusail', 0.15, 1, 10],
-  ['Dashboard Cover - SUV', 'DB-002', 'product', 'Dashboards', 'piece', 4, 65, 140, 'lusail', 0.12, 1, 10],
-  ['Dashboard Protectant', 'DB-003', 'supply', 'Dashboards', 'bottle', 4, 24, null, 'pearl', 0.3, 1, 15],
-  ['Leather Seat Cover Set', 'SC-001', 'product', 'Seat Cover', 'set', 2, 450, 850, 'lusail', 0.05, 1, 5],
-  ['Fabric Seat Cover Set', 'SC-002', 'product', 'Seat Cover', 'set', 4, 180, 350, 'lusail', 0.1, 1, 8, 'low'],
-  ['Steering Wheel Cover', 'SC-003', 'product', 'Seat Cover', 'piece', 6, 18, 45, 'lusail', 0.2, 1, 20],
-  ['Roof Rack Crossbars', 'RM-001', 'product', 'Roof Modification', 'pair', 2, 280, 550, 'lusail', 0.03, 1, 4],
-  ['Roof Star Light Kit', 'RM-002', 'product', 'Roof Modification', 'box', 2, 210, 450, 'lusail', 0.03, 1, 4],
-  ['Headliner Fabric', 'RM-003', 'supply', 'Roof Modification', 'roll', 1, 140, null, null, 0.03, 1, 3],
-  ['3D Floor Mats - Sedan', 'FM-001', 'product', 'Floor Modification', 'set', 4, 120, 260, 'lusail', 0.12, 1, 10],
-  ['Rubber Floor Mats', 'FM-002', 'product', 'Floor Modification', 'set', 6, 45, 95, 'lusail', 0.25, 1, 15, 'out'],
-  ['Floor Carpet Roll', 'FM-003', 'supply', 'Floor Modification', 'roll', 1, 210, null, null, 0.02, 1, 2],
 ];
 
 // Physical counts that found a difference: [days ago, item code, change, note]
 const SAMPLE_COUNTS = [
-  [31, 'CW-004', -1, 'Monthly count: 1 bottle leaked in the store'],
-  [31, 'CW-005', -1, 'Monthly count: 1 pack missing'],
-  [9, 'CW-009', -3, 'Count fix: 3 damaged by the heat'],
-  [9, 'CW-006', 1, 'Count fix: 1 found in the detailing bay'],
+  [1, 'CW-010', -1, 'Count fix: 1 bottle leaked in the store'],
 ];
 
 const SALE_NOTES = [null, null, null, 'Sold with a wash', 'Walk-in customer', 'Added to the order'];
-const DAYS = 60;
+const DAYS = 1;
 
 seeder(30, (d, h) => {
   d.inventory_items = [];
@@ -412,7 +380,7 @@ seeder(30, (d, h) => {
     return { item, rate, step, restock, flag };
   });
   sims.find((s) => s.item.code === 'CW-001').item.notes = 'Dilute 1:400 for the foam lance';
-  sims.find((s) => s.item.code === 'DT-003').item.notes = 'Order 2 weeks ahead';
+  sims.find((s) => s.item.code === 'CW-007').item.notes = 'Order a week ahead';
 
   const push = (s, type, change, createdAt, extra = {}) => {
     s.item.quantity = round2(s.item.quantity + change);
@@ -495,9 +463,6 @@ seeder(30, (d, h) => {
     ['Wet & dry vacuum 80 L (x3)', 410, 5400, 'Pearl Coast Car Care Supplies', null],
     ['Dual-action polisher (x2)', 230, 2600, 'Desert Gloss Trading', 'Spare backing plates in the store'],
     ['Air compressor 300 L', 380, 4300, null, 'Used for tyres and drying'],
-    ['Water softener / RO system', 300, 9600, 'Bayline Cleaning Chemicals', 'Filter change every 3 months'],
-    ['Steam cleaner for interiors', 95, 3900, 'Desert Gloss Trading', null],
-    ['Tint film cutting plotter', 35, 7200, 'Corniche Tint & Film', 'Warranty 1 year'],
   ];
   machines.forEach(([name, ago, amount, supplier, notes]) => {
     const created = ts(ago, 12, 0);
@@ -834,39 +799,20 @@ function samplePdf(lines) {
 const BILL_TITLE = { utility: 'UTILITY BILL', shop_rent: 'RENT RECEIPT', room_rent: 'RENT RECEIPT', salary: 'SALARY SLIP', other: 'INVOICE' };
 
 // ── expenses: sample data ───────────────────────────────────
-const WORKERS = [['Ramesh', 1900], ['Suresh', 1900], ['Bikash', 1800], ['Joseph', 2100], ['Anil', 2000], ['Imran (supervisor)', 4200], ['Maria (cashier)', 3200]];
-
 seeder(30, (d, h) => {
   d.expenses = [];
   const today = dateOnly(0);
-  const now = new Date();
   const r = rng(31);
-  const rows = [];
-  const monthName = (y, m) => new Date(y, m, 1).toLocaleString('en-US', { month: 'long' });
+  const monthName = new Date().toLocaleString('en-US', { month: 'long' });
 
-  // The last three months (this month only up to today)
-  for (let back = 2; back >= 0; back--) {
-    const y = new Date(now.getFullYear(), now.getMonth() - back, 1).getFullYear();
-    const m = new Date(now.getFullYear(), now.getMonth() - back, 1).getMonth();
-    const on = (day) => `${y}-${pad(m + 1)}-${pad(day)}`;
-    const thisMonth = monthName(y, m);
-    const lastMonth = monthName(y, m - 1);
-    const slug = `${y}-${pad(m + 1)}`;
-
-    rows.push(['shop_rent', on(1), 22000, 'Al Waab building owner', `${thisMonth} rent`, back === 1 ? `rent-receipt-${slug}.pdf` : null]);
-    rows.push(['room_rent', on(2), 5500, "Workers' accommodation landlord", `${thisMonth} rent, 2 rooms`]);
-    WORKERS.forEach(([name, pay], i) => rows.push(['salary', on(3), pay + (i === 3 && back === 0 ? 150 : 0), name, `${lastMonth} salary${i === 3 && back === 0 ? ' + overtime' : ''}`]));
-    rows.push(['utility', on(8), round2(3200 + r.int(0, 900) + r.int(0, 99) / 100), 'Electricity & water authority', `Electricity & water, ${lastMonth}`, `electricity-water-${slug}.pdf`]);
-    rows.push(['utility', on(10), 449, 'Internet provider', `Internet & phone line, ${thisMonth}`]);
-    rows.push(['other', on(r.int(5, 9)), 120 + r.int(0, 60), 'Water tanker', 'Extra water delivery']);
-    rows.push(['other', on(r.int(12, 14)), 85, 'Stationery shop', 'Receipt rolls and printer paper']);
-  }
-  // One-off costs
-  rows.push(['other', dateOnly(44), 650, 'Bayline Cleaning Chemicals', 'Pressure washer pump repair', 'repair-invoice-pressure-washer.pdf']);
-  rows.push(['other', dateOnly(27), 960, 'Uniform tailor', '8 staff uniforms']);
-  rows.push(['other', dateOnly(19), 300, 'Pest control service', 'Quarterly pest control']);
-  rows.push(['other', dateOnly(6), 1250, 'Sign maker', 'New price board at the entrance']);
-  rows.push(['utility', dateOnly(4), 180, 'Gas cylinder supplier', 'Gas for the staff kitchen']);
+  // Five recent costs, one of each kind
+  const rows = [
+    ['shop_rent', dateOnly(12), 22000, 'Al Waab building owner', `${monthName} rent`, 'rent-receipt.pdf'],
+    ['salary', dateOnly(10), 2100, 'Joseph', 'Last month salary'],
+    ['utility', dateOnly(7), 3640.5, 'Electricity & water authority', 'Electricity & water, last month', 'electricity-water.pdf'],
+    ['room_rent', dateOnly(5), 5500, "Workers' accommodation landlord", `${monthName} rent, 2 rooms`],
+    ['other', dateOnly(2), 150, 'Water tanker', 'Extra water delivery'],
+  ];
 
   rows
     .filter(([, date]) => date <= today)

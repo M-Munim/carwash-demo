@@ -4,9 +4,14 @@ A demo of the car wash management dashboard. It runs without a backend: every
 request is answered in the browser by `utils/demo`, with sample data.
 
 - Logins: `owner` / `demo1234` (Super Admin) and `staff` / `demo1234` (Admin).
-- Changes are saved in the visitor's browser only. "Reset demo data" in the menu
-  brings back the sample data.
-- Uploaded files (photos, bills, screen ads) last until the page is reloaded.
+- The sample data is small (about 5 rows per page) so it is easy to follow.
+- Visitors can add, edit and delete anything. Changes are kept in the visitor's
+  browser for 20 seconds after their last change, with a countdown at the bottom
+  of the screen, then the sample data comes back and the page reloads. Change the
+  time with `CHANGE_TTL_MS` in `utils/demo/core.js`. "Reset demo data" in the
+  menu brings the sample data back at once.
+- Uploaded files (photos, bills, screen ads) are cleared with the other changes,
+  or when the page is reloaded.
 - No WhatsApp message is really sent by the Broadcast page; it is simulated.
 
 ## Run

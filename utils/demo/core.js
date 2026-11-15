@@ -4,12 +4,20 @@
 // and saved to localStorage, so changes survive a page reload in the same
 // browser. "Reset demo data" (Sidebar) puts the sample data back.
 //
+// Changes a visitor makes (add, edit, delete) are kept for CHANGE_TTL_MS after
+// their last change, then the sample data comes back on its own, so the demo
+// is clean for the next person. DemoResetNotice shows the countdown.
+//
 // A domain module registers its routes with route(...) and its sample data
 // with seeder(...). See utils/demo/index.js for the list of modules.
 
 import { AxiosError } from 'axios';
 
-const STORAGE_KEY = 'washdesk-demo-db-v1';
+// v2: the smaller sample data (v1 saves are ignored).
+const STORAGE_KEY = 'washdesk-demo-db-v2';
+const RESET_AT_KEY = 'washdesk-demo-reset-at';
+/** How long a visitor's changes stay before the sample data comes back. */
+export const CHANGE_TTL_MS = 20 * 1000;
 
 // ── routes ──────────────────────────────────────────────────
 const routes = [];
@@ -59,9 +67,13 @@ function seed() {
 export function getDb() {
   if (db) return db;
   if (typeof window !== 'undefined') {
+    watchOtherTabs();
     try {
+      const resetAt = Number(window.localStorage.getItem(RESET_AT_KEY)) || 0;
       const saved = window.localStorage.getItem(STORAGE_KEY);
-      if (saved) db = JSON.parse(saved);
+      // Changes whose time ran out while the page was closed are not loaded.
+      if (saved && !(resetAt && resetAt <= Date.now())) db = JSON.parse(saved);
+      if (db && resetAt) armResetTimer(resetAt);
     } catch {
       db = null;
     }
@@ -69,6 +81,7 @@ export function getDb() {
   if (!db) {
     db = seed();
     save();
+    clearResetAt();
   }
   return db;
 }
@@ -86,6 +99,77 @@ export function save() {
 export function resetDemoData() {
   db = seed();
   save();
+  clearResetAt();
+  resetListeners.forEach((fn) => { try { fn(); } catch { /* ignore */ } });
+}
+
+// ── a visitor's changes expire after CHANGE_TTL_MS ─────────
+const resetListeners = [];
+/** onDemoReset(fn): fn runs when the sample data comes back (e.g. to drop in-memory files). */
+export function onDemoReset(fn) {
+  resetListeners.push(fn);
+}
+
+let resetTimer = null;
+let resetAtMs = 0;
+
+/** When the visitor's changes will be cleared (ms timestamp), or 0 when there are none. */
+export function getDemoResetAt() {
+  return resetAtMs;
+}
+
+function emit(name, detail) {
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(name, { detail }));
+}
+
+function armResetTimer(at) {
+  resetAtMs = at;
+  clearTimeout(resetTimer);
+  resetTimer = setTimeout(expireChanges, Math.max(0, at - Date.now()));
+  emit('washdesk-demo-changed', { resetAt: at });
+}
+
+function clearResetAt() {
+  clearTimeout(resetTimer);
+  resetTimer = null;
+  resetAtMs = 0;
+  if (typeof window === 'undefined') return;
+  try { window.localStorage.removeItem(RESET_AT_KEY); } catch { /* ignore */ }
+}
+
+/** A change was saved: keep the changes for CHANGE_TTL_MS from now. */
+export function changeMade() {
+  if (typeof window === 'undefined') return;
+  const at = Date.now() + CHANGE_TTL_MS;
+  try { window.localStorage.setItem(RESET_AT_KEY, String(at)); } catch { /* ignore */ }
+  armResetTimer(at);
+}
+
+function expireChanges() {
+  resetDemoData();
+  emit('washdesk-demo-reset', {});
+}
+
+// Another tab (kiosk, queue screen) saved or cleared the data: read it again.
+let watching = false;
+function watchOtherTabs() {
+  if (watching) return;
+  watching = true;
+  window.addEventListener('storage', (e) => {
+    if (e.key === STORAGE_KEY) db = null;
+    if (e.key === RESET_AT_KEY) {
+      const at = Number(e.newValue) || 0;
+      if (at) {
+        armResetTimer(at);
+      } else {
+        clearTimeout(resetTimer);
+        resetTimer = null;
+        resetAtMs = 0;
+        db = null;
+        emit('washdesk-demo-reset', {});
+      }
+    }
+  });
 }
 
 /** Next id for a table (1, 2, 3 …), kept in db._ids. */
@@ -226,9 +310,14 @@ export async function demoAdapter(config) {
   match.keys.forEach((k, i) => { params[k] = decodeURIComponent(m[i + 1]); });
 
   const d = getDb();
+  // Some POSTs only read (e.g. the order list): only a real change starts the timer.
+  const before = method !== 'GET' ? JSON.stringify(d) : null;
   try {
     const out = await match.handler({ params, query, body, files, db: d, user: currentUser(config.headers), method, path });
-    if (method !== 'GET') save();
+    if (method !== 'GET') {
+      save();
+      if (JSON.stringify(d) !== before) changeMade();
+    }
     if (out && typeof out === 'object' && 'status' in out && 'data' in out && Object.keys(out).length === 2) {
       return respond(out.status, out.data);
     }

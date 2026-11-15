@@ -1,6 +1,7 @@
 import "./globals.css";
 import { Inter } from "next/font/google";
 import { AuthProvider } from "./contexts/AuthContext";
+import DemoResetNotice from "./components/DemoResetNotice";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -41,6 +42,7 @@ export default function RootLayout({ children }) {
       <body className={`${inter.className} bg-gray-50`} suppressHydrationWarning>
         <AuthProvider>
           {children}
+          <DemoResetNotice />
         </AuthProvider>
       </body>
     </html>

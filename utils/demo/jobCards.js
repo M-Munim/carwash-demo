@@ -378,11 +378,11 @@ const COLOURS = ['White', 'Pearl White', 'Black', 'Silver', 'Grey', 'Dark Blue',
 const COLOUR_HEX = { White: '#f4f4f4', 'Pearl White': '#ece8df', Black: '#2b2b2b', Silver: '#c3c6c9', Grey: '#8a8f94', 'Dark Blue': '#1f3a64', Maroon: '#6d1f2a', Beige: '#d8c7a6' };
 
 /** Sample customers left unsaved, so search also shows "from past orders" people. */
-const UNSAVED = [8, 17, 26, 33];
+const UNSAVED = [];
 /** Sample customers with a second car: [index, vehicle type, plate]. */
-const SECOND_CARS = [[1, 'SUV', '604112'], [4, 'Sedan', '611835'], [6, '7-Seater', '618207'], [12, 'SUV', '625590'], [19, 'Sedan', '632741'], [24, '7-Seater', '640068']];
-const EMAILS = { 1: 'fatima.hassan@example.com', 12: 'john.mathews@example.com', 13: 'priya.nair@example.com', 21: 'salman.q@example.com' };
-const CUSTOMER_NOTES = { 0: 'Regular every Friday', 4: 'Two family cars', 12: 'Company car, invoice to the company', 21: 'Prefers hand dry only', 29: 'Call before collecting' };
+const SECOND_CARS = [[1, 'SUV', '604112']];
+const EMAILS = { 1: 'fatima.hassan@example.com' };
+const CUSTOMER_NOTES = { 0: 'Regular every Friday', 1: 'Two family cars' };
 
 const WASH = 'Body Wash – In & Out';
 /** Rough minutes each service takes (for the sample timelines). */
@@ -394,52 +394,19 @@ const WORK_MIN = { [WASH]: 40, 'Glass Polish': 60, 'Full Interior Cleaning': 120
  */
 const JOBS = [
   // delivered and invoiced
-  { c: 0, ago: 24, h: 10, m: 15, status: 'delivered', services: ['Body Polishing', 'Glass Polish'], tech: 'Ramesh', fuel: 'half',
+  { c: 0, ago: 2, h: 10, m: 15, status: 'delivered', services: ['Body Polishing', 'Glass Polish'], tech: 'Ramesh', fuel: 'half',
     damage: 'Light swirl marks on bonnet and roof. Small scratch on rear bumper (left).', complaints: 'Wants the shine back before a family trip.',
     pay: { payment_method: 'Card', payment_status: 'paid' }, photos: ['Before polishing: bonnet', 'After polishing: bonnet'] },
-  { c: 2, ago: 21, h: 9, m: 40, status: 'delivered', services: ['Full Interior Cleaning'], tech: 'Joseph', fuel: 'quarter',
-    complaints: 'Juice spilled on the back seat, sticky floor mats.', pay: { payment_method: 'Cash', payment_status: 'paid' } },
-  { c: 4, v: 1, ago: 19, h: 11, m: 0, status: 'delivered', services: ['Nano Ceramic Coating – Graphene Pro'], tech: 'Bashir', fuel: 'three_quarters',
-    damage: 'Stone chips on the front bumper.', qcFail: 'High spots on the boot lid, buff again', promise: 480,
-    pay: { payment_method: 'Card', payment_status: 'paid' } },
-  { c: 9, ago: 16, h: 13, m: 20, status: 'delivered', services: ['Interior & Exterior Polishing'], tech: 'Anil', fuel: 'half',
-    notes: 'Customer waited in the lounge', pay: { payment_method: 'Card', payment_type: 'Fawran', payment_status: 'paid' } },
-  { c: 12, ago: 14, h: 8, m: 50, status: 'delivered', services: ['Nano Ceramic Tint'], tech: 'Sunil', fuel: 'full',
-    complaints: 'Old tint bubbling on the rear window. Remove and redo all windows.', promise: 300,
-    pay: { payment_method: 'Card', payment_status: 'paid' } },
-  { c: 14, ago: 12, h: 15, m: 10, status: 'delivered', services: [WASH, 'Full Interior Cleaning'], tech: 'Joseph', fuel: 'half',
-    complaints: 'Sand everywhere after a desert trip.', pay: { payment_method: 'Cash', payment_status: 'paid' } },
-  { c: 19, ago: 10, h: 10, m: 30, status: 'delivered', services: ['Body Polishing'], tech: 'Ramesh', fuel: 'quarter',
-    damage: 'Dent on the driver door (old).', pay: { payment_method: 'Cash', payment_type: 'Paylater', payment_status: 'unpaid' } },
-  { c: 21, ago: 7, h: 9, m: 15, status: 'delivered', services: ['Paint Protection Film (PPF)'], tech: 'Bashir', fuel: 'full',
-    damage: 'No visible damage. Paint checked with the customer.', notes: 'Full front PPF, matte finish not wanted', promise: 660,
-    pay: { payment_method: 'Card', payment_status: 'paid' } },
-  { c: 27, ago: 4, h: 11, m: 45, status: 'delivered', services: [WASH, 'Glass Polish'], tech: 'Anil', fuel: 'half',
-    complaints: 'Water spots on the windscreen.', pay: { payment_method: 'Card', payment_status: 'paid' } },
-  { c: 30, ago: 2, h: 14, m: 0, status: 'delivered', services: ['Full Interior Cleaning', 'Seat Cover'], tech: 'Sunil', fuel: 'three_quarters',
-    complaints: 'Torn driver seat, wants new seat covers (black leather).', pay: { payment_method: 'Card', payment_type: 'Partner Credit', payment_status: 'paid' } },
-  // cancelled
-  { c: 24, ago: 9, h: 16, m: 0, status: 'cancelled', services: ['Nano Ceramic Tint'], fuel: 'half',
-    cancelNote: 'Customer could not leave the car today, will book again' },
   // still in the workshop
-  { c: 13, ago: 1, h: 15, m: 30, status: 'ready', services: ['Nano Ceramic Coating – Graphene Pro'], tech: 'Bashir', fuel: 'half',
-    damage: 'Kerb rash on the front right rim.', notes: 'Collects today after work', promiseAt: [0, 12, 0] },
-  { c: 6, minsAgo: 260, work: 180, status: 'ready', services: ['Body Polishing', 'Glass Polish'], tech: 'Ramesh', fuel: 'quarter',
+  { c: 4, minsAgo: 260, work: 180, status: 'ready', services: ['Body Polishing'], tech: 'Ramesh', fuel: 'quarter',
     damage: 'Scratch on the rear bumper (right).', promise: 300 },
   { c: 3, minsAgo: 150, work: 110, status: 'quality_check', services: ['Full Interior Cleaning'], tech: 'Joseph', fuel: 'half',
     complaints: 'Coffee stain on the passenger seat. Smell of smoke inside.', promise: 180 },
-  { c: 15, minsAgo: 115, work: 40, status: 'quality_check', services: [WASH, 'Glass Polish'], tech: 'Anil', fuel: 'three_quarters',
-    qcFail: 'Water marks on the side mirrors', promise: 120 },
-  { c: 5, minsAgo: 70, status: 'in_progress', services: ['Interior & Exterior Polishing'], tech: 'Sunil', fuel: 'half',
+  { c: 2, minsAgo: 70, status: 'in_progress', services: ['Interior & Exterior Polishing'], tech: 'Sunil', fuel: 'half',
     damage: 'Small dent on the boot lid.', notes: 'Keep the floor mats in the boot', promise: 300 },
-  { c: 23, ago: 1, h: 10, m: 0, status: 'in_progress', services: ['Paint Protection Film (PPF)'], tech: 'Bashir', fuel: 'full',
-    damage: 'Stone chips on the front bumper and bonnet.', complaints: 'Full body PPF, gloss finish.', promiseAt: [-1, 18, 0],
-    photos: ['Check-in: front bumper stone chips', 'Check-in: bonnet'] },
-  { c: 10, minsAgo: 40, status: 'in_progress', services: [WASH, 'Dashboard Cover'], tech: 'Joseph', fuel: 'quarter', promise: 90 },
   { c: 1, v: 1, minsAgo: 20, status: 'open', services: ['Body Polishing'], fuel: 'half',
     damage: 'Scratch on the rear bumper, swirl marks on both front doors.', complaints: 'Wants the scratches polished out if possible.', promise: 240,
     photos: ['Check-in: rear bumper scratch'] },
-  { c: 28, minsAgo: 8, status: 'open', services: [WASH, 'Full Interior Cleaning'], fuel: 'empty', notes: 'Customer waiting in the lounge', promise: 150 },
 ];
 
 const FRONT_DESK = 'staff';

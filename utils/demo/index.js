@@ -7,5 +7,5 @@ import './jobCards';
 import './inventory';
 import './broadcast';
 
-export { demoAdapter, resetDemoData } from './core';
+export { demoAdapter, resetDemoData, CHANGE_TTL_MS } from './core';
 export { DEMO_ACCOUNTS } from './auth';

@@ -1,23 +1,13 @@
 // Demo: car wash orders, appointments, the queue screen and the activity log
 // (deletions, price changes). Mirrors the booking endpoints of the real backend.
 
-import { route, seeder, httpError, nextId, nowIso, dateOnly, isoAt, rng, paginate, getDb } from './core';
-import { SERVICE_GROUPS, EXTRAS, TOKEN_LETTERS, EXTRAS_TOKEN_LETTER, servicesPrice, findExtra } from '../priceList';
+import { route, seeder, httpError, nextId, nowIso, dateOnly, isoAt, paginate, getDb } from './core';
+import { SERVICE_GROUPS, TOKEN_LETTERS, EXTRAS_TOKEN_LETTER, servicesPrice } from '../priceList';
 
 // ── sample people ───────────────────────────────────────────
 export const SAMPLE_CUSTOMERS = [
   ['Ahmed Al-Mansoori', '97455012301'], ['Fatima Hassan', '97455012302'], ['Omar Khalid', '97455012303'],
-  ['Sara Ibrahim', '97455012304'], ['Yousef Al-Kuwari', '97455012305'], ['Mariam Saleh', '97455012306'],
-  ['Khalid Rahman', '97455012307'], ['Noura Al-Thani', '97455012308'], ['Hamad Nasser', '97455012309'],
-  ['Aisha Mohammed', '97455012310'], ['Rashid Ali', '97455012311'], ['Layla Faris', '97455012312'],
-  ['John Mathews', '97455012313'], ['Priya Nair', '97455012314'], ['David Wilson', '97455012315'],
-  ['Ravi Kumar', '97455012316'], ['Hassan Tariq', '97455012317'], ['Mohammed Saeed', '97455012318'],
-  ['Abdullah Jaber', '97455012319'], ['Reem Adel', '97455012320'], ['Tariq Aziz', '97455012321'],
-  ['Salman Qureshi', '97455012322'], ['Ali Haider', '97455012323'], ['Huda Kamal', '97455012324'],
-  ['Faisal Al-Marri', '97455012325'], ['Mona Youssef', '97455012326'], ['Imran Sheikh', '97455012327'],
-  ['George Thomas', '97455012328'], ['Nasser Al-Sulaiti', '97455012329'], ['Dana Al-Emadi', '97455012330'],
-  ['Bilal Anwar', '97455012331'], ['Zainab Hussain', '97455012332'], ['Karim Mostafa', '97455012333'],
-  ['Lina Haddad', '97455012334'], ['Sami Al-Kaabi', '97455012335'], ['Arjun Menon', '97455012336'],
+  ['Sara Ibrahim', '97455012304'], ['Yousef Al-Kuwari', '97455012305'],
 ];
 /** Each sample customer's car: [vehicle type, plate]. Same index as SAMPLE_CUSTOMERS. */
 export const SAMPLE_CARS = SAMPLE_CUSTOMERS.map((_, i) => [
@@ -26,11 +16,6 @@ export const SAMPLE_CARS = SAMPLE_CUSTOMERS.map((_, i) => [
 ]);
 
 const WASH = 'Body Wash – In & Out';
-const SERVICE_MIX = [
-  [WASH], [WASH], [WASH], [WASH], [WASH], [WASH], [WASH], [WASH],
-  ['Full Interior Cleaning'], [WASH, 'Glass Polish'], ['Body Polishing'], [WASH, 'Full Interior Cleaning'],
-  ['Interior & Exterior Polishing'], ['Nano Ceramic Tint'], ['Nano Ceramic Coating – Graphene Pro'], ['Glass Polish'],
-];
 
 // ── formatting like the backend ─────────────────────────────
 const splitTokens = (v) => String(v || '').split(',').map((t) => t.trim()).filter(Boolean);
@@ -152,78 +137,51 @@ seeder(10, (d) => {
   d.bookings = [];
   d.activity_log = [];
   d.token_counters = {};
-  const r = rng(7);
-  const DAYS = 75;
-  for (let ago = DAYS; ago >= 0; ago--) {
-    const day = dateOnly(ago);
-    const weekday = new Date(`${day}T12:00:00`).getDay();
-    const busy = weekday === 5 || weekday === 6; // Friday / Saturday
-    const count = ago === 0 ? 14 : r.int(busy ? 16 : 9, busy ? 26 : 17);
-    for (let i = 0; i < count; i++) {
-      // Past days: spread over 8:00-21:00. Today: one every ~25 minutes up to now.
-      let hour = 8 + Math.floor((i / count) * 13);
-      let minute = r.int(0, 59);
-      if (ago === 0) {
-        const at = new Date(Date.now() - (count - i) * 25 * 60000);
-        hour = at.getHours();
-        minute = at.getMinutes();
-      }
-      // The last 8 sample customers stopped coming 3+ weeks ago ("haven't come back" audience).
-      const ci = r.int(0, ago < 22 ? SAMPLE_CUSTOMERS.length - 9 : SAMPLE_CUSTOMERS.length - 1);
-      const walkIn = r.chance(0.18);
-      const [name, phone] = walkIn ? ['Walk-in customer', ''] : SAMPLE_CUSTOMERS[ci];
-      const [vehicle, plate] = walkIn ? [r.pick(['Sedan', 'SUV', '7-Seater']), String(r.int(100000, 999999))] : SAMPLE_CARS[ci];
-      const services = r.pick(SERVICE_MIX);
-      const extras = r.chance(0.08) ? [r.pick(EXTRAS).name] : [];
-      const main = servicesPrice(services, vehicle) ?? 0;
-      const extrasPrice = extras.reduce((s, n) => s + (findExtra(n)?.price ?? 0), 0);
-      const subtotal = main + extrasPrice;
-      const discount = r.chance(0.06) ? 'Coupon' : r.chance(0.03) ? 'Loyalty Free' : null;
-      const total = discount === 'Coupon' ? Math.round(subtotal / 2) : discount === 'Loyalty Free' ? 0 : subtotal;
-      const method = r.chance(0.55) ? 'Card' : 'Cash';
-      const type = r.chance(0.12) ? r.pick(['Fawran', 'Paylater', 'Partner Credit']) : null;
-      let stage = 'collected';
-      let paid = 'paid';
-      if (ago === 0) {
-        const left = count - i;
-        stage = left <= 3 ? 'waiting' : left <= 5 ? 'washing' : left <= 7 ? 'ready' : 'collected';
-        paid = stage === 'collected' ? 'paid' : r.chance(0.4) ? 'paid' : 'unpaid';
-      } else if (r.chance(0.04)) {
-        paid = 'unpaid';
-      }
-      const time = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-      insertBooking(d, {
-        status: stage,
-        Service: 'car wash',
-        service_type: r.chance(0.35) ? 'kiosk' : 'walk-in',
-        passenger_name: name,
-        contact_number: phone ? `+${phone}` : null,
-        package: services.join(', '),
-        sub_Service: JSON.stringify(services),
-        package_price: main,
-        car_name: vehicle,
-        car_number: plate,
-        add_ons: extras.join(', ') || null,
-        add_ons_price: extras.length ? extrasPrice : null,
-        date: day,
-        time: `${time}:00`,
-        date_time: `${day} ${time}`,
-        price: total,
-        subtotal,
-        discount,
-        coupon_serial: discount === 'Coupon' ? `CP-${r.int(1000, 9999)}` : null,
-        payment_method: method,
-        payment_type: type,
-        payment_channel: type,
-        payment_status: paid,
-      }, { createdAt: isoAt(ago, hour, minute), day });
-    }
-  }
-
-  // A few upcoming appointments
-  const appts = [
-    [1, '10:00', 'Detailing', 3], [2, '11:30', 'Polishing', 7], [3, '16:00', 'Graphene', 12], [5, '09:30', 'Detailing', 20],
+  const local = (t) => {
+    const p = (n) => String(n).padStart(2, '0');
+    return { day: `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}`, time: `${p(t.getHours())}:${p(t.getMinutes())}` };
+  };
+  // A small sample: one order from yesterday and three in the shop now
+  // (a fifth order comes from the delivered job card). [customer index or -1 for
+  // a walk-in, services, stage, payment status, method, when]
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  yesterday.setHours(10, 20, 0, 0);
+  const minsAgo = (n) => new Date(Date.now() - n * 60000);
+  const ORDERS = [
+    [0, [WASH], 'collected', 'paid', 'Card', yesterday, 'walk-in'],
+    [2, [WASH, 'Glass Polish'], 'ready', 'unpaid', 'Card', minsAgo(95), 'kiosk'],
+    [3, [WASH], 'washing', 'paid', 'Cash', minsAgo(40), 'walk-in'],
+    [-1, [WASH], 'waiting', 'unpaid', 'Cash', minsAgo(10), 'walk-in'],
   ];
+  ORDERS.forEach(([ci, services, stage, paid, method, at, source]) => {
+    const [name, phone] = ci < 0 ? ['Walk-in customer', ''] : SAMPLE_CUSTOMERS[ci];
+    const [vehicle, plate] = ci < 0 ? ['Sedan', '482915'] : SAMPLE_CARS[ci];
+    const price = servicesPrice(services, vehicle) ?? 0;
+    const { day, time } = local(at);
+    insertBooking(d, {
+      status: stage,
+      Service: 'car wash',
+      service_type: source,
+      passenger_name: name,
+      contact_number: phone ? `+${phone}` : null,
+      package: services.join(', '),
+      sub_Service: JSON.stringify(services),
+      package_price: price,
+      car_name: vehicle,
+      car_number: plate,
+      date: day,
+      time: `${time}:00`,
+      date_time: `${day} ${time}`,
+      price,
+      subtotal: price,
+      payment_method: method,
+      payment_status: paid,
+    }, { createdAt: at.toISOString(), day });
+  });
+
+  // Two upcoming appointments
+  const appts = [[1, '10:00', 'Detailing', 1], [3, '16:00', 'Graphene', 4]];
   appts.forEach(([ahead, time, type, ci]) => {
     const date = dateOnly(-ahead);
     insertBooking(d, {

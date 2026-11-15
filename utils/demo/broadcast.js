@@ -465,12 +465,10 @@ function seedBroadcastData(d, h) {
     }),
   ];
 
-  // Opt-outs: three sample customers and one number that never visited
+  // Opt-outs: one sample customer and one number that never visited
   const optOut = (i, fields) => ({ phone: SAMPLE_CUSTOMERS[i][1], name: SAMPLE_CUSTOMERS[i][0], created_by: null, ...fields });
   d.whatsapp_opt_outs = [
     optOut(4, { reason: 'Replied STOP', source: 'customer', created_at: at(18, 19, 12) }),
-    optOut(13, { reason: 'Asked at the counter not to get offers', source: 'staff', created_by: ACTOR, created_at: at(30, 13, 5) }),
-    optOut(27, { reason: 'Replied STOP', source: 'customer', created_at: at(9, 21, 40) }),
     { phone: '97433998877', name: 'Former fleet manager', reason: 'Company number, no longer used', source: 'staff', created_by: ACTOR, created_at: at(50, 10) },
   ];
 
@@ -492,7 +490,7 @@ function seedBroadcastData(d, h) {
   ];
   const sent = [
     [1, 1, 'Weekend wash offer', { type: 'all', days: null, service: null }, at(26, 9, 30)],
-    [2, 2, 'Polishing offer', { type: 'recent', days: 60, service: 'Body Polishing' }, at(12, 10)],
+    [2, 2, 'Polishing offer', { type: 'all', days: null, service: null }, at(12, 10)],
     [3, 1, 'Weekend wash: regular customers', { type: 'recent', days: 3, service: 'Body Wash – In & Out' }, hoursAgo(20)],
   ];
   sent.forEach(([id, tplId, title, audience, when]) => {
