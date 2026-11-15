@@ -1,0 +1,149 @@
+// WashDesk official price list (QAR), taken from the client's price list
+// poster. Single source for the order form, the orders table and customer data.
+//
+// Wash / polish / protection services are priced for Sedan, SUV and 7-Seater.
+// PPF uses its own vehicle sizes (Sedan, Crossover, SUV, GMC / Large SUV), so the
+// vehicle choices depend on the service picked.
+
+export const SERVICE_GROUPS = [
+  {
+    key: 'wash',
+    title: 'Car Wash, Polishing & Protection',
+    vehicles: ['Sedan', 'SUV', '7-Seater'],
+    services: [
+      { name: 'Body Wash – In & Out',                prices: { Sedan: 30,   SUV: 35,   '7-Seater': 40 } },
+      { name: 'Body Polishing',                      prices: { Sedan: 300,  SUV: 350,  '7-Seater': 400 } },
+      { name: 'Glass Polish',                        prices: { Sedan: 150,  SUV: 180,  '7-Seater': 200 } },
+      { name: 'Full Interior Cleaning',              prices: { Sedan: 280,  SUV: 350,  '7-Seater': 400 } },
+      { name: 'Interior & Exterior Polishing',       prices: { Sedan: 600,  SUV: 650,  '7-Seater': 750 } },
+      { name: 'Nano Ceramic Tint',                   prices: { Sedan: 1000, SUV: 1200, '7-Seater': 1500 } },
+      { name: 'Nano Ceramic Coating – Graphene Pro', prices: { Sedan: 1000, SUV: 1200, '7-Seater': 1500 } },
+    ],
+  },
+  {
+    key: 'ppf',
+    title: 'Paint Protection Film (PPF)',
+    vehicles: ['Sedan', 'Crossover', 'SUV', 'GMC / Large SUV'],
+    services: [
+      { name: 'Paint Protection Film (PPF)', prices: { Sedan: 6000, Crossover: 7000, SUV: 8000, 'GMC / Large SUV': 9000 } },
+    ],
+  },
+];
+
+/**
+ * Other services (upholstery & interior work) — can be added on top of a main
+ * service, or booked on their own. `from: true` = starting price, may be higher.
+ */
+export const OTHER_SERVICES_TITLE = 'Other Services';
+
+export const EXTRAS = [
+  { name: 'Floor Mat',                  price: 450, from: true },
+  { name: 'Dashboard Cover',            price: 70 },
+  { name: 'Steering Wheel Cover',       price: 70 },
+  { name: 'Handrest Cover',             price: 70 },
+  { name: 'Side Door Cover',            price: 200 },
+  { name: 'Roof / Ceiling Modification', price: 500 },
+  { name: 'Seat Cover',                 price: 550, from: true },
+];
+
+/** Every vehicle type on the price list. */
+export const ALL_VEHICLES = ['Sedan', 'Crossover', 'SUV', '7-Seater', 'GMC / Large SUV'];
+
+export const DISCOUNTS = ['Coupon', 'Loyalty Free', 'Fleet Discount'];
+
+/** How the customer pays… */
+export const PAYMENT_METHODS = ['Cash', 'Card'];
+/** …and through which channel / arrangement. */
+export const PAYMENT_TYPES = ['Fawran', 'Paylater', 'Partner Credit'];
+
+/** Future appointments are booked for one of these. */
+export const APPOINTMENT_TYPES = ['Detailing', 'Polishing', 'Graphene'];
+
+/** A coupon (with its serial number) takes 50% off the whole bill. */
+export const COUPON_RATE = 0.5;
+
+/** True when the order qualifies for the coupon discount. */
+export const couponApplies = (discount, couponSerial) =>
+  discount === 'Coupon' && String(couponSerial || '').trim() !== '';
+
+/** Total after discount. Only the coupon has a fixed amount (50%) for now. */
+export const applyDiscount = (subtotal, discount, couponSerial) =>
+  couponApplies(discount, couponSerial) ? Math.round(subtotal * (1 - COUPON_RATE) * 100) / 100 : subtotal;
+
+export function findService(name) {
+  for (const group of SERVICE_GROUPS) {
+    const service = group.services.find((s) => s.name === name);
+    if (service) return { group, service };
+  }
+  return null;
+}
+
+/** Vehicle choices for a service. With no service (extras only) any vehicle can be picked. */
+export const vehiclesForService = (name) => findService(name)?.group.vehicles ?? ALL_VEHICLES;
+
+/** Service price for a vehicle, or undefined when that combination isn't on the list. */
+export const servicePrice = (name, vehicle) => findService(name)?.service.prices[vehicle];
+
+export const findExtra = (name) => EXTRAS.find((e) => e.name === name);
+
+// ── Several main services in one order (e.g. Body Wash + Nano Ceramic Tint + PPF) ──
+// Saved on the backend as one comma-separated text; no service name has a comma.
+const SERVICE_SEPARATOR = ', ';
+export const joinServices = (list) => (list || []).filter(Boolean).join(SERVICE_SEPARATOR);
+export const splitServices = (text) => String(text || '').split(',').map((s) => s.trim()).filter(Boolean);
+const asList = (services) => (Array.isArray(services) ? services : splitServices(services));
+
+/** Vehicles every chosen service is priced for (PPF and wash use different sizes). */
+export const vehiclesForServices = (services) =>
+  asList(services).reduce((allowed, name) => allowed.filter((v) => vehiclesForService(name).includes(v)), ALL_VEHICLES);
+
+/** Sum of the chosen services for a vehicle, or undefined when one of them has no price for it. */
+export function servicesPrice(services, vehicle) {
+  const list = asList(services);
+  if (list.length === 0) return undefined;
+  let sum = 0;
+  for (const name of list) {
+    const price = servicePrice(name, vehicle);
+    if (price === undefined) return undefined;
+    sum += price;
+  }
+  return sum;
+}
+
+/** Services (one name, a list, or comma-separated text) + extras, straight from the price list. */
+export function priceFor(services, vehicle, extras = []) {
+  const base = servicesPrice(services, vehicle) ?? 0;
+  return extras.reduce((sum, name) => sum + (findExtra(name)?.price ?? 0), base);
+}
+
+// ── Token numbers (client request, 21 Oct 2026) ──
+// One order gets one token per kind of work, so each team calls its own job:
+// order 172 with a wash, a tint and a polish → W172 · T172 · P172.
+export const TOKEN_LETTERS = {
+  'Body Wash – In & Out': 'W',
+  'Full Interior Cleaning': 'W',
+  'Body Polishing': 'P',
+  'Glass Polish': 'P',
+  'Interior & Exterior Polishing': 'P',
+  'Nano Ceramic Tint': 'T',
+  'Nano Ceramic Coating – Graphene Pro': 'C',
+  'Paint Protection Film (PPF)': 'F',
+};
+export const EXTRAS_TOKEN_LETTER = 'U'; // Other Services (covers, mats…)
+export const TOKEN_NAMES = { W: 'Washing', P: 'Polishing', T: 'Tinting', C: 'Coating', F: 'PPF', U: OTHER_SERVICES_TITLE };
+
+/**
+ * Tokens for an order, in the order the services were picked, one per letter.
+ * Orders with no known service (older data) keep the old "A172" style.
+ */
+export function tokensFor(number, services = [], extras = []) {
+  const letters = [];
+  asList(services).forEach((name) => {
+    const letter = TOKEN_LETTERS[name];
+    if (letter && !letters.includes(letter)) letters.push(letter);
+  });
+  if (extras.length > 0 && !letters.includes(EXTRAS_TOKEN_LETTER)) letters.push(EXTRAS_TOKEN_LETTER);
+  return (letters.length ? letters : ['A']).map((letter) => `${letter}${number}`);
+}
+
+export const formatQar =(amount) => `QAR ${Number(amount || 0).toLocaleString('en-US')}`;

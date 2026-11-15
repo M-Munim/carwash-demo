@@ -1,0 +1,138 @@
+'use client';
+
+import { Droplets, Users, MonitorSmartphone, Tv, MonitorPlay, ClipboardCheck, Megaphone, Boxes, Receipt, ClipboardList, ExternalLink, X, ChevronRight, RotateCcw } from 'lucide-react';
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { useEffect } from 'react';
+import NextImage from 'next/image';
+import logo from "../../public/washdesk-logo.png";
+import { useAuth } from '../contexts/AuthContext';
+import { resetDemoData } from '../../utils/demo';
+
+/** Puts the sample data back (demo only). */
+function resetDemo() {
+  if (!window.confirm('Reset the demo? All changes made in this browser are replaced with the sample data.')) return;
+  resetDemoData();
+  window.location.reload();
+}
+
+// Client scope (initial stage): Car Wash Orders, Customer Data, the kiosk and the queue screen.
+// More modules will be added back here as they are requested.
+const menuItems = [
+  { icon: Droplets, label: 'Car Wash Orders', href: '/orders' },
+  { icon: Users, label: 'Customer Data', href: '/customer-data' },
+  // Work orders for a visit: customer + vehicle, checks, services, technician, status.
+  { icon: ClipboardList, label: 'Job Cards', href: '/job-cards' },
+  // Daily closing report: cash / card / online collected, export, print, WhatsApp.
+  { icon: ClipboardCheck, label: 'Day Close', href: '/day-close' },
+  // Videos / pictures the queue screen plays between queue views.
+  { icon: MonitorPlay, label: 'Screen Ads', href: '/screen-ads' },
+  // Wash supplies and products for sale: stock in / use / sale / count.
+  { icon: Boxes, label: 'Inventory', href: '/inventory', permission: 'canManageInventory' },
+  // Bills, rent, salaries with the bill file (Super Admin only: salaries are private).
+  { icon: Receipt, label: 'Expenses', href: '/expenses', permission: 'canManageExpenses' },
+  // WhatsApp messages to many customers (Super Admin only).
+  { icon: Megaphone, label: 'WhatsApp Broadcast', href: '/broadcast', permission: 'canManageBroadcasts' },
+  // Customer self-service screen — opens in its own tab (full screen, no sidebar).
+  { icon: MonitorSmartphone, label: 'Customer Kiosk', href: '/kiosk', newTab: true },
+  // Order status board for the TV in the waiting area.
+  { icon: Tv, label: 'Queue Screen', href: '/queue', newTab: true },
+];
+
+export default function Sidebar({ isOpen, toggleSidebar }) {
+  const pathname = usePathname();
+  const { hasPermission } = useAuth();
+
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isOpen]);
+
+  return (
+    <>
+      <aside
+        className={`fixed top-0 left-0 h-screen bg-[var(--brand-black)] z-50 transition-transform duration-300 ease-in-out border-r border-white/5 ${
+          isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
+        } w-[280px] sm:w-[300px] lg:w-[252px]`}
+      >
+        <div className="flex flex-col h-full overflow-y-auto">
+          {/* Header with Logo */}
+          <div className="relative flex items-center justify-center px-5 py-5 border-b border-white/10">
+            <NextImage
+              src={logo}
+              alt="WashDesk — Car Wash & Auto Care"
+              className="w-full max-w-[190px] h-auto object-contain"
+              priority
+            />
+
+            <button
+              className="lg:hidden absolute top-3 right-3 text-gray-400 hover:text-white p-2 hover:bg-white/10 transition-colors shrink-0"
+              onClick={toggleSidebar}
+              aria-label="Close menu"
+            >
+              <X size={20} aria-hidden="true" />
+            </button>
+          </div>
+
+          {/* Navigation */}
+          <nav className="px-3 py-3 flex-1" aria-label="Main navigation">
+            <div className="stagger-fade-in">
+              {menuItems.filter((item) => !item.permission || hasPermission(item.permission)).map((item) => {
+                const isActive = pathname === item.href || pathname.startsWith(`${item.href}/`);
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    aria-current={isActive ? 'page' : undefined}
+                    {...(item.newTab ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+                    className={`group w-full flex items-center gap-3 px-3 py-2.5 mb-0.5 text-sm transition-all duration-200 ${
+                      isActive
+                        ? 'bg-[var(--primary)] text-white font-medium shadow-sm'
+                        : 'text-gray-300 hover:bg-white/5 hover:text-white'
+                    }`}
+                    onClick={() => {
+                      if (window.innerWidth < 1024) {
+                        toggleSidebar();
+                      }
+                    }}
+                  >
+                    <item.icon className={`w-[18px] h-[18px] shrink-0 transition-colors duration-200 ${
+                      isActive ? 'text-white' : 'text-gray-500 group-hover:text-[var(--primary)]'
+                    }`} aria-hidden="true" />
+                    <span className="text-left text-[13px] leading-tight flex-1">{item.label}</span>
+                    {item.newTab && (
+                      <ExternalLink className="w-3.5 h-3.5 text-gray-500 shrink-0" aria-hidden="true" />
+                    )}
+                    {isActive && (
+                      <ChevronRight className="w-3.5 h-3.5 text-white/70 shrink-0" aria-hidden="true" />
+                    )}
+                  </Link>
+                );
+              })}
+            </div>
+          </nav>
+
+          {/* Footer */}
+          <div className="px-4 py-3 border-t border-white/10">
+            <button
+              type="button"
+              onClick={resetDemo}
+              className="w-full mb-2 flex items-center justify-center gap-1.5 px-3 py-1.5 text-[12px] text-gray-300 border border-white/15 hover:bg-white/10 transition-colors"
+            >
+              <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" /> Reset demo data
+            </button>
+            <div className="text-[11px] text-gray-500 text-center">
+              WashDesk v1.0 · Demo
+            </div>
+          </div>
+        </div>
+      </aside>
+    </>
+  );
+}

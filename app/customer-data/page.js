@@ -1,0 +1,717 @@
+'use client';
+
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import {
+  Search, RotateCcw, RefreshCw, Download, Megaphone, Users, X, Info, Loader2, AlertCircle, ChevronLeft, ChevronRight,
+} from 'lucide-react';
+import Sidebar from '../components/Sidebar';
+import Header from '../components/Header';
+import Toast from '../components/Toast';
+import { useFocusTrap } from '@/app/hooks/useFocusTrap';
+import { DISCOUNTS, PAYMENT_TYPES, SERVICE_GROUPS, ALL_VEHICLES, OTHER_SERVICES_TITLE } from '../../utils/priceList';
+import { fetchCarWashOrders } from '../../utils/carWashApi';
+
+/** Customers per page in the table (paging is on screen; server-side paging is planned). */
+const ROWS_PER_PAGE = 100;
+
+// ─────────────────────────────────────────────────────────────
+// Customer types (segments)
+// ─────────────────────────────────────────────────────────────
+const SEGMENTS = ['Repeat', 'Occasional', 'Rare', 'New', 'Inactive'];
+
+const SEGMENT_META = {
+  Repeat:     { pill: 'bg-green-100 text-green-700',   rule: '4 or more visits, and visited in the last 60 days' },
+  Occasional: { pill: 'bg-blue-100 text-blue-700',     rule: '2 to 3 visits, and visited in the last 60 days' },
+  Rare:       { pill: 'bg-amber-100 text-amber-700',   rule: 'Only 1 visit, more than 30 days ago' },
+  New:        { pill: 'bg-violet-100 text-violet-700', rule: 'First visit in the last 30 days' },
+  Inactive:   { pill: 'bg-red-100 text-red-700',       rule: 'No visit for more than 60 days' },
+};
+
+/** Applies the rules above. Inactive wins, then single-visit customers split into New / Rare. */
+const getSegment = ({ visits, daysSinceVisit }) => {
+  if (daysSinceVisit > 60) return 'Inactive';
+  if (visits === 1) return daysSinceVisit <= 30 ? 'New' : 'Rare';
+  if (visits <= 3) return 'Occasional';
+  return 'Repeat';
+};
+
+const STATUS_PILL = {
+  Paid:   'bg-green-100 text-green-700',
+  Unpaid: 'bg-red-100 text-red-700',
+};
+
+const PROMO_TEMPLATES = [
+  { label: 'Weekend offer',  text: 'Hi {name}, enjoy 20% off any wash this weekend at WashDesk. Book now!' },
+  { label: 'We miss you',    text: 'Hi {name}, we miss you! Come back this week and get a free interior freshener with your wash.' },
+  { label: 'Loyalty reward', text: 'Hi {name}, thank you for being a loyal customer. Your next Body Polishing is 15% off.' },
+];
+
+// ─────────────────────────────────────────────────────────────
+// Customers, built from the car wash orders on the backend
+// ─────────────────────────────────────────────────────────────
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Whole days between a YYYY-MM-DD date and today (0 for today or a future date). */
+function daysSince(isoDate, today) {
+  const [y, m, d] = String(isoDate || '').slice(0, 10).split('-').map(Number);
+  if (!y || !m || !d) return Number.POSITIVE_INFINITY;
+  const start = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  return Math.max(0, Math.round((start - new Date(y, m - 1, d)) / DAY_MS));
+}
+
+const firstFilled = (list, pick) => list.map(pick).find((v) => v) || '';
+
+/**
+ * One row per car: phone + number plate (just the phone when there is no
+ * plate, or the name when there is no phone either). `orders` come newest
+ * first, so the first one is the latest visit.
+ */
+function buildCustomers(orders) {
+  const today = new Date();
+  const groups = new Map();
+  orders.forEach((o) => {
+    // One row per car: phone + number plate. Staff enter the car as the
+    // customer's name, and one phone can bring several cars (e.g. a Duster
+    // and a Pajero on 77875504) — grouping by phone alone merged them.
+    const phoneKey = (o.customer.phone || '').replace(/\D/g, '');
+    const plateKey = String(o.numberPlate || '').replace(/\s+/g, '').toUpperCase();
+    const who = phoneKey || `name:${o.customer.name.trim().toLowerCase()}`;
+    const key = plateKey ? `${who}|${plateKey}` : who;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(o);
+  });
+
+  return [...groups.entries()].map(([key, list]) => {
+    const serviceCount = new Map();
+    list.forEach((o) => {
+      // An order can have several main services; each one counts.
+      const names = o.services?.length ? o.services : [`${OTHER_SERVICES_TITLE} only`];
+      names.forEach((svc) => serviceCount.set(svc, (serviceCount.get(svc) || 0) + 1));
+    });
+    const favourite = [...serviceCount.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+    const customer = {
+      id: key,
+      name: firstFilled(list, (o) => (o.customer.name !== 'Walk-in customer' ? o.customer.name : '')) || list[0].customer.name,
+      phone: firstFilled(list, (o) => o.customer.phone),
+      plate: firstFilled(list, (o) => o.numberPlate),
+      vehicle: firstFilled(list, (o) => o.vehicle),
+      service: favourite,
+      discount: firstFilled(list, (o) => o.discount),
+      visits: list.length,
+      daysSinceVisit: Math.min(...list.map((o) => daysSince(o.date || o.createdAt, today))),
+      spent: Math.round(list.reduce((sum, o) => sum + (Number(o.total) || 0), 0) * 100) / 100,
+      payment: firstFilled(list, (o) => o.paymentType),
+      status: list.some((o) => o.status !== 'paid') ? 'Unpaid' : 'Paid',
+    };
+    return { ...customer, segment: getSegment(customer) };
+  });
+}
+
+const EMPTY_FILTERS = {
+  q: '', segment: '', lastVisit: '', visits: '', service: '', vehicle: '',
+  discount: '', payment: '', status: '', spent: '',
+};
+
+const SERVICES = [
+  ...SERVICE_GROUPS.flatMap((g) => g.services.map((svc) => svc.name)),
+  `${OTHER_SERVICES_TITLE} only`,
+];
+const VEHICLES = ALL_VEHICLES;
+
+function matchesFilters(c, f) {
+  const q = f.q.trim().toLowerCase();
+  if (q && !`${c.name} ${c.phone} ${c.plate}`.toLowerCase().includes(q)) return false;
+  if (f.segment && c.segment !== f.segment) return false;
+
+  if (f.lastVisit === 'old' && c.daysSinceVisit <= 60) return false;
+  if (f.lastVisit && f.lastVisit !== 'old' && c.daysSinceVisit > Number(f.lastVisit)) return false;
+
+  if (f.visits === '1' && c.visits !== 1) return false;
+  if (f.visits === '2' && (c.visits < 2 || c.visits > 3)) return false;
+  if (f.visits === '4' && c.visits < 4) return false;
+
+  if (f.service && c.service !== f.service) return false;
+  if (f.vehicle && c.vehicle !== f.vehicle) return false;
+  if (f.discount && c.discount !== f.discount) return false;
+  if (f.payment && c.payment !== f.payment) return false;
+  if (f.status && c.status !== f.status) return false;
+
+  if (f.spent === '0-300' && c.spent >= 300) return false;
+  if (f.spent === '300-800' && (c.spent < 300 || c.spent >= 800)) return false;
+  if (f.spent === '800+' && c.spent < 800) return false;
+  return true;
+}
+
+/** "5 Oct (3d ago)" — relative to the viewer's today. */
+const lastVisitLabel = (days) => {
+  if (!Number.isFinite(days)) return '—';
+  if (days === 0) return 'Today';
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return `${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} (${days}d ago)`;
+};
+
+const firstName = (name) => (name || '').split(' ')[0] || 'Customer';
+
+/** CSV that opens cleanly in Excel (BOM + quoted cells). */
+function downloadCsv(list) {
+  const header = ['Name', 'Phone', 'Plate', 'Vehicle', 'Service', 'Discount', 'Visits', 'Days since last visit', 'Spent (QAR)', 'Payment type', 'Status', 'Type'];
+  const rows = list.map((c) => [c.name, c.phone, c.plate, c.vehicle, c.service, c.discount, c.visits, c.daysSinceVisit, c.spent, c.payment, c.status, c.segment]);
+  const csv = [header, ...rows]
+    .map((row) => row.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))
+    .join('\r\n');
+  const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'washdesk-customers.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Send promotion modal (demo — nothing is actually sent)
+// ─────────────────────────────────────────────────────────────
+function PromotionModal({ allList, filteredList, selectedList, onClose, onSend }) {
+  const modalRef = useFocusTrap(true, onClose);
+  const [target, setTarget] = useState(selectedList.length > 0 ? 'selected' : 'all');
+  const [channel, setChannel] = useState('WhatsApp');
+  const [template, setTemplate] = useState('');
+  const [message, setMessage] = useState('');
+
+  const recipients = target === 'selected' ? selectedList : target === 'filtered' ? filteredList : allList;
+  const preview = (message || 'Your message will appear here').replaceAll('{name}', firstName(recipients[0]?.name));
+  const canSend = recipients.length > 0 && message.trim().length > 0;
+
+  const targets = [
+    { key: 'all',      label: 'All customers',                         count: allList.length },
+    { key: 'filtered', label: 'Customers in the current filter',       count: filteredList.length },
+    { key: 'selected', label: 'Selected customers (tick in the table)', count: selectedList.length },
+  ];
+
+  return (
+    <div className="fixed inset-0 bg-black/40 modal-backdrop z-50 flex items-center justify-center p-4">
+      <div
+        ref={modalRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="promo-title"
+        className="bg-white shadow-xl w-full max-w-lg max-h-[92vh] overflow-y-auto animate-fade-in-scale"
+      >
+        <div className="sticky top-0 z-10 bg-white flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div>
+            <h2 id="promo-title" className="text-base font-semibold text-gray-900">Send promotion</h2>
+            <p className="text-xs text-gray-500 mt-0.5">Write one message and send it to your customers.</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" className="btn-icon p-1.5 hover:bg-gray-100 transition-colors text-gray-400 hover:text-gray-600">
+            <X className="w-5 h-5" aria-hidden="true" />
+          </button>
+        </div>
+
+        <div className="p-6">
+          <fieldset>
+            <legend className="text-[13px] font-medium text-gray-700 mb-1.5">Send to</legend>
+            {targets.map((t) => {
+              const disabled = t.key === 'selected' && t.count === 0;
+              return (
+                <label
+                  key={t.key}
+                  className={`flex items-center gap-2.5 px-3 py-2.5 mb-2 border text-sm font-normal transition-colors ${
+                    target === t.key ? 'border-[var(--primary)] bg-[var(--primary-light)]' : 'border-gray-200'
+                  } ${disabled ? 'opacity-45 cursor-not-allowed' : 'cursor-pointer'}`}
+                >
+                  <input
+                    type="radio"
+                    name="promo-target"
+                    value={t.key}
+                    checked={target === t.key}
+                    disabled={disabled}
+                    onChange={() => setTarget(t.key)}
+                    className="accent-[var(--primary)]"
+                  />
+                  <span className="text-gray-800">{t.label} <b>({t.count})</b></span>
+                </label>
+              );
+            })}
+          </fieldset>
+
+          <div className="grid grid-cols-2 gap-3 mt-3">
+            <div>
+              <label htmlFor="promo-channel">Send via</label>
+              <select id="promo-channel" value={channel} onChange={(e) => setChannel(e.target.value)}>
+                <option>WhatsApp</option>
+                <option>SMS</option>
+              </select>
+            </div>
+            <div>
+              <label htmlFor="promo-template">Template</label>
+              <select
+                id="promo-template"
+                value={template}
+                onChange={(e) => {
+                  setTemplate(e.target.value);
+                  if (e.target.value !== '') setMessage(PROMO_TEMPLATES[Number(e.target.value)].text);
+                }}
+              >
+                <option value="">Choose a template</option>
+                {PROMO_TEMPLATES.map((t, i) => <option key={t.label} value={i}>{t.label}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div className="mt-3">
+            <label htmlFor="promo-message">
+              Message <span className="font-normal text-gray-500">(use {'{name}'} to add the customer&apos;s name)</span>
+            </label>
+            <textarea
+              id="promo-message"
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder="Hi {name}, enjoy 20% off your next wash this weekend!"
+            />
+          </div>
+
+          <div className="mt-3">
+            <span className="block text-[13px] font-medium text-gray-700 mb-1.5">Preview</span>
+            <div className="bg-green-50 border border-green-100 px-3 py-2.5 text-sm text-gray-800 whitespace-pre-wrap break-words">
+              {preview}
+            </div>
+          </div>
+
+          <div className="form-footer">
+            <button type="button" onClick={onClose} className="px-5 py-2 text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors">
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={!canSend}
+              onClick={() => onSend(recipients.length, channel)}
+              className="px-5 py-2 text-sm font-medium bg-green-600 text-white hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Send to {recipients.length} customer{recipients.length === 1 ? '' : 's'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Filter field
+// ─────────────────────────────────────────────────────────────
+function FilterSelect({ id, label, value, onChange, options, allLabel = 'All' }) {
+  return (
+    <div>
+      <label htmlFor={id}>{label}</label>
+      <select id={id} value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">{allLabel}</option>
+        {options.map((o) => {
+          const [val, text] = Array.isArray(o) ? o : [o, o];
+          return <option key={val} value={val}>{text}</option>;
+        })}
+      </select>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Main page
+// ─────────────────────────────────────────────────────────────
+export default function CustomerDataPage() {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [customers, setCustomers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [showPromo, setShowPromo] = useState(false);
+  const [toast, setToast] = useState(null);
+
+  const toggleSidebar = useCallback(() => setSidebarOpen((v) => !v), []);
+  const closePromo = useCallback(() => setShowPromo(false), []);
+  const setFilter = (key) => (value) => setFilters((prev) => ({ ...prev, [key]: value }));
+
+  const loadCustomers = useCallback(async () => {
+    try {
+      setCustomers(buildCustomers(await fetchCarWashOrders()));
+      setLoadError(null);
+    } catch (error) {
+      console.error('Error loading customers:', error);
+      setLoadError(error?.message || 'Could not load customers from the server.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadCustomers();
+  }, [loadCustomers]);
+
+  const refreshNow = async () => {
+    setLoading(true);
+    setLoadError(null);
+    await loadCustomers();
+  };
+
+  const filtered = useMemo(() => customers.filter((c) => matchesFilters(c, filters)), [customers, filters]);
+  const selectedList = useMemo(() => customers.filter((c) => selectedIds.has(c.id)), [customers, selectedIds]);
+  const segmentCounts = useMemo(() => {
+    const counts = Object.fromEntries(SEGMENTS.map((s) => [s, 0]));
+    customers.forEach((c) => { counts[c.segment] += 1; });
+    return counts;
+  }, [customers]);
+
+  // Page of the table; back to page 1 whenever the filters change.
+  const pageKey = JSON.stringify(filters);
+  const [pageState, setPageState] = useState({ key: '', n: 1 });
+  const pageCount = Math.max(1, Math.ceil(filtered.length / ROWS_PER_PAGE));
+  const currentPage = Math.min(pageState.key === pageKey ? pageState.n : 1, pageCount);
+  const pageRows = useMemo(
+    () => filtered.slice((currentPage - 1) * ROWS_PER_PAGE, currentPage * ROWS_PER_PAGE),
+    [filtered, currentPage],
+  );
+  const tableRef = useRef(null);
+  const goToPage = (n) => {
+    setPageState({ key: pageKey, n });
+    if (tableRef.current) tableRef.current.scrollTop = 0;
+  };
+
+  const allShownSelected = pageRows.length > 0 && pageRows.every((c) => selectedIds.has(c.id));
+  const hasFilters = Object.values(filters).some(Boolean);
+
+  const toggleSelected = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAllShown = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      pageRows.forEach((c) => (allShownSelected ? next.delete(c.id) : next.add(c.id)));
+      return next;
+    });
+  };
+
+  const handleExport = () => {
+    if (filtered.length === 0) {
+      setToast({ message: 'No customers to export with these filters.', type: 'warning' });
+      return;
+    }
+    downloadCsv(filtered);
+    setToast({ message: `Exported ${filtered.length} customer${filtered.length === 1 ? '' : 's'}`, type: 'success' });
+  };
+
+  const handleSend = (count, channel) => {
+    setShowPromo(false);
+    setToast({ message: `Demo: promotion sent to ${count} customer${count === 1 ? '' : 's'} via ${channel}. (Nothing was actually sent.)`, type: 'success' });
+  };
+
+  const segmentCards = [{ key: '', label: 'All customers', count: customers.length }]
+    .concat(SEGMENTS.map((s) => ({ key: s, label: `${s} customers`, count: segmentCounts[s] })));
+
+  return (
+    <div className="flex min-h-screen bg-gray-50 overflow-x-hidden">
+      <Sidebar isOpen={sidebarOpen} toggleSidebar={toggleSidebar} />
+
+      {sidebarOpen && (
+        <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={toggleSidebar} aria-hidden="true" />
+      )}
+
+      <div className="flex-1 flex flex-col min-h-screen lg:ml-[240px] w-full lg:w-auto overflow-x-hidden">
+        <div className="px-4 md:px-6 pt-4 md:pt-6">
+          <Header title="Customer Data" toggleSidebar={toggleSidebar} />
+        </div>
+
+        <main className="flex-1 px-4 md:px-6 pb-6 overflow-x-hidden">
+          <div className="space-y-4">
+            {/* Segment cards */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+              {segmentCards.map((card) => {
+                const active = filters.segment === card.key;
+                return (
+                  <button
+                    key={card.key || 'all'}
+                    type="button"
+                    onClick={() => setFilter('segment')(card.key)}
+                    aria-pressed={active}
+                    className={`text-left bg-white border px-4 py-3 transition-all ${
+                      active
+                        ? 'border-[var(--primary)] ring-2 ring-[var(--primary)]/20'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <span className="block text-2xl font-bold text-gray-900">{card.count}</span>
+                    <span className="block text-xs text-gray-500 mt-0.5">{card.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100">
+              {/* Panel header */}
+              <div className="flex items-center gap-3 px-5 py-4 border-b border-gray-100">
+                <div className="w-10 h-10 rounded-lg bg-[var(--primary)]/10 flex items-center justify-center shrink-0">
+                  <Users className="w-5 h-5 text-[var(--primary)]" aria-hidden="true" />
+                </div>
+                <div>
+                  <h1 className="text-base font-semibold text-gray-900">Customers</h1>
+                  <p className="text-xs text-gray-500">Filter your customers, export a list, or send them a promotion</p>
+                </div>
+              </div>
+
+              {/* Filters */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 px-5 pt-4">
+                <div>
+                  <label htmlFor="f-q">Search</label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" aria-hidden="true" />
+                    <input
+                      id="f-q"
+                      type="text"
+                      value={filters.q}
+                      onChange={(e) => setFilter('q')(e.target.value)}
+                      placeholder="Name, phone or plate"
+                      className="pl-9 pr-3"
+                    />
+                  </div>
+                </div>
+                <FilterSelect id="f-segment" label="Customer type" value={filters.segment} onChange={setFilter('segment')} options={SEGMENTS} />
+                <FilterSelect
+                  id="f-last" label="Last visit" value={filters.lastVisit} onChange={setFilter('lastVisit')} allLabel="Any time"
+                  options={[['7', 'Last 7 days'], ['30', 'Last 30 days'], ['90', 'Last 90 days'], ['old', 'More than 60 days ago']]}
+                />
+                <FilterSelect
+                  id="f-visits" label="Number of visits" value={filters.visits} onChange={setFilter('visits')} allLabel="Any"
+                  options={[['1', '1 visit'], ['2', '2 – 3 visits'], ['4', '4+ visits']]}
+                />
+                <FilterSelect id="f-service" label="Service" value={filters.service} onChange={setFilter('service')} options={SERVICES} />
+                <FilterSelect id="f-vehicle" label="Vehicle type" value={filters.vehicle} onChange={setFilter('vehicle')} options={VEHICLES} />
+                <FilterSelect id="f-discount" label="Discount" value={filters.discount} onChange={setFilter('discount')} options={DISCOUNTS} />
+                <FilterSelect id="f-payment" label="Payment type" value={filters.payment} onChange={setFilter('payment')} options={PAYMENT_TYPES} />
+                <FilterSelect id="f-status" label="Status" value={filters.status} onChange={setFilter('status')} options={['Paid', 'Unpaid']} />
+                <FilterSelect
+                  id="f-spent" label="Total spent" value={filters.spent} onChange={setFilter('spent')} allLabel="Any"
+                  options={[['0-300', 'Below QAR 300'], ['300-800', 'QAR 300 – 799'], ['800+', 'QAR 800+']]}
+                />
+              </div>
+
+              {/* Actions */}
+              <div className="flex flex-wrap items-center gap-2 px-5 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setFilters(EMPTY_FILTERS)}
+                  disabled={!hasFilters}
+                  className="flex items-center gap-1.5 px-3 py-2 border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" aria-hidden="true" /> Clear filters
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExport}
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-[var(--primary)] text-white hover:bg-[var(--primary-hover)] transition-colors"
+                >
+                  <Download className="w-4 h-4" aria-hidden="true" /> Export to Excel (CSV)
+                </button>
+                <button
+                  type="button"
+                  onClick={refreshNow}
+                  disabled={loading}
+                  className="flex items-center gap-1.5 px-3 py-2 border border-gray-300 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors disabled:opacity-60"
+                  title="Load the latest data from the server"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} aria-hidden="true" /> Refresh
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowPromo(true)}
+                  className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-green-600 text-white hover:bg-green-700 transition-colors"
+                >
+                  <Megaphone className="w-4 h-4" aria-hidden="true" /> Send promotion
+                </button>
+                {selectedIds.size > 0 && (
+                  <span className="text-xs text-gray-500">
+                    {selectedIds.size} selected ·{' '}
+                    <button type="button" onClick={() => setSelectedIds(new Set())} className="text-[var(--primary)] hover:text-[var(--primary-hover)] font-medium">
+                      Clear
+                    </button>
+                  </span>
+                )}
+                <span className="ml-auto text-sm text-gray-500">
+                  Showing {filtered.length} of {customers.length} customers
+                </span>
+              </div>
+
+              {loadError && (
+                <div className="mx-5 mt-3 px-3 py-2 flex flex-wrap items-center gap-2 text-sm bg-red-50 border border-red-200 text-red-700" role="alert">
+                  <AlertCircle className="w-4 h-4 shrink-0" aria-hidden="true" />
+                  <span className="mr-auto">Could not load customers: {loadError}</span>
+                  <button onClick={refreshNow} className="text-xs font-semibold underline">Try again</button>
+                </div>
+              )}
+
+              {/* Table */}
+              <div className="p-4 sm:p-5">
+                <div ref={tableRef} className="overflow-auto max-h-[70vh] border border-gray-200 rounded-lg">
+                  <table className="w-full border-collapse min-w-[1250px]">
+                    <thead>
+                      <tr>
+                        <th className="sticky top-0 z-10 bg-gray-50 pl-3.5 pr-1 py-2.5 border-b border-gray-200 w-8">
+                          <input
+                            type="checkbox"
+                            checked={allShownSelected}
+                            onChange={toggleAllShown}
+                            className="w-4 h-4 accent-[var(--primary)]"
+                            aria-label="Select all customers on this page"
+                          />
+                        </th>
+                        {['Customer', 'Phone', 'Plate', 'Vehicle', 'Favourite service', 'Discount', 'Visits', 'Last visit', 'Spent (QAR)', 'Payment type', 'Status', 'Type'].map((h) => (
+                          <th key={h} className="sticky top-0 z-10 text-left text-[10px] uppercase tracking-wide text-gray-500 font-semibold bg-gray-50 px-3 py-2.5 border-b border-gray-200 whitespace-nowrap">
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pageRows.map((c) => (
+                        <tr key={c.id} className="hover:bg-gray-50 border-b border-gray-100 last:border-0">
+                          <td className="pl-3.5 pr-1 py-3">
+                            <input
+                              type="checkbox"
+                              checked={selectedIds.has(c.id)}
+                              onChange={() => toggleSelected(c.id)}
+                              className="w-4 h-4 accent-[var(--primary)]"
+                              aria-label={`Select ${c.name}`}
+                            />
+                          </td>
+                          <td className="px-3 py-3 text-sm font-medium text-gray-900 whitespace-nowrap">{c.name}</td>
+                          <td className="px-3 py-3 text-sm text-gray-700 whitespace-nowrap">{c.phone}</td>
+                          <td className="px-3 py-3 text-sm text-gray-700 whitespace-nowrap">{c.plate || '—'}</td>
+                          <td className="px-3 py-3 text-sm text-gray-700 whitespace-nowrap">{c.vehicle || '—'}</td>
+                          <td className="px-3 py-3 text-sm text-gray-700 whitespace-nowrap">{c.service || '—'}</td>
+                          <td className="px-3 py-3 text-sm text-gray-700 whitespace-nowrap">{c.discount || '—'}</td>
+                          <td className="px-3 py-3 text-sm text-gray-700">{c.visits}</td>
+                          <td className="px-3 py-3 text-sm text-gray-700 whitespace-nowrap" suppressHydrationWarning>
+                            {lastVisitLabel(c.daysSinceVisit)}
+                          </td>
+                          <td className="px-3 py-3 text-sm font-medium text-gray-900">{c.spent.toLocaleString('en-US')}</td>
+                          <td className="px-3 py-3 text-sm text-gray-700 whitespace-nowrap">{c.payment || '—'}</td>
+                          <td className="px-3 py-3">
+                            <span
+                              className={`inline-flex px-3 py-1 rounded-full text-xs font-semibold ${STATUS_PILL[c.status]}`}
+                              title={c.status === 'Unpaid' ? 'Has at least one unpaid order' : 'All orders paid'}
+                            >
+                              {c.status}
+                            </span>
+                          </td>
+                          <td className="px-3 py-3">
+                            <span className={`inline-flex px-3 py-1 rounded-full text-xs font-semibold ${SEGMENT_META[c.segment].pill}`}>
+                              {c.segment}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  {filtered.length === 0 && (
+                    <div className="text-center py-14 text-gray-500">
+                      {loading ? (
+                        <>
+                          <Loader2 className="w-8 h-8 mx-auto mb-3 text-[var(--primary)] animate-spin" aria-hidden="true" />
+                          <p className="text-sm">Loading customers…</p>
+                        </>
+                      ) : (
+                        <>
+                          <Users className="w-10 h-10 mx-auto mb-3 text-gray-300" aria-hidden="true" />
+                          <p className="text-sm">{customers.length === 0 && !loadError ? 'No customers yet — they appear here once orders are entered' : 'No customers match these filters'}</p>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {filtered.length > ROWS_PER_PAGE && (
+                  <nav className="flex flex-wrap items-center justify-between gap-3 mt-3" aria-label="Customer pages">
+                    <span className="text-xs text-gray-500">
+                      Showing <b className="text-gray-800">{(currentPage - 1) * ROWS_PER_PAGE + 1}–{Math.min(currentPage * ROWS_PER_PAGE, filtered.length)}</b> of <b className="text-gray-800">{filtered.length}</b> customers
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => goToPage(currentPage - 1)}
+                        disabled={currentPage === 1}
+                        className="flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors disabled:opacity-40"
+                      >
+                        <ChevronLeft className="w-3.5 h-3.5" aria-hidden="true" /> Previous
+                      </button>
+                      {Array.from({ length: pageCount }, (_, i) => i + 1).map((n) => (
+                        <button
+                          key={n}
+                          type="button"
+                          onClick={() => goToPage(n)}
+                          aria-current={n === currentPage ? 'page' : undefined}
+                          className={`min-w-[32px] text-xs font-semibold px-2 py-1.5 border transition-colors ${
+                            n === currentPage
+                              ? 'bg-[var(--primary)] text-white border-[var(--primary)]'
+                              : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                          }`}
+                        >
+                          {n}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => goToPage(currentPage + 1)}
+                        disabled={currentPage === pageCount}
+                        className="flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 bg-white text-gray-700 border border-gray-300 hover:bg-gray-50 transition-colors disabled:opacity-40"
+                      >
+                        Next <ChevronRight className="w-3.5 h-3.5" aria-hidden="true" />
+                      </button>
+                    </div>
+                  </nav>
+                )}
+
+                <p className="text-[11px] text-gray-400 mt-3">
+                  Built from your car wash orders · Unpaid = the customer has at least one unpaid order · tick customers to send them a promotion
+                </p>
+              </div>
+            </div>
+
+            {/* Segment rules */}
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 px-5 py-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Info className="w-4 h-4 text-[var(--primary)]" aria-hidden="true" />
+                <h2 className="text-sm font-semibold text-gray-900">How customer types are decided</h2>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                {SEGMENTS.map((s) => (
+                  <div key={s} className="border border-gray-100 bg-gray-50 px-3 py-3">
+                    <span className={`inline-flex px-3 py-0.5 rounded-full text-xs font-semibold ${SEGMENT_META[s].pill}`}>{s}</span>
+                    <p className="text-xs text-gray-600 mt-2 leading-relaxed">{SEGMENT_META[s].rule}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+
+      {showPromo && (
+        <PromotionModal
+          allList={customers}
+          filteredList={filtered}
+          selectedList={selectedList}
+          onClose={closePromo}
+          onSend={handleSend}
+        />
+      )}
+
+      {toast && (
+        <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />
+      )}
+    </div>
+  );
+}

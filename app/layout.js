@@ -1,0 +1,48 @@
+import "./globals.css";
+import { Inter } from "next/font/google";
+import { AuthProvider } from "./contexts/AuthContext";
+
+const inter = Inter({ subsets: ["latin"] });
+
+export const metadata = {
+  title: {
+    default: "WashDesk Dashboard",
+    template: "%s | WashDesk",
+  },
+  description: "WashDesk Dashboard - Car Wash & Auto Care order management in Qatar",
+  keywords: ["car wash", "auto care", "Qatar", "dashboard", "orders"],
+  authors: [{ name: "WashDesk" }],
+  icons: {
+    apple: "/apple-touch-icon.png",
+  },
+  openGraph: {
+    title: "WashDesk Dashboard",
+    description: "Car Wash & Auto Care order management",
+    type: "website",
+    locale: "en_US",
+  },
+};
+
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+};
+
+export default function RootLayout({ children }) {
+  return (
+    // translate="no": browser translation (e.g. Chrome on the Arabic kiosk screens) rewrites
+    // text that React manages and crashes the page. The kiosk has its own Arabic.
+    <html lang="en" translate="no" className="notranslate">
+      <head>
+        <link rel="icon" href="/favicon.ico" sizes="any" />
+        <meta name="google" content="notranslate" />
+      </head>
+      <body className={`${inter.className} bg-gray-50`} suppressHydrationWarning>
+        <AuthProvider>
+          {children}
+        </AuthProvider>
+      </body>
+    </html>
+  );
+}
