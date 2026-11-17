@@ -22,6 +22,29 @@ const MAX_BODY = 1024;
 const MAX_FOOTER = 60;
 const MAX_BUTTON_TEXT = 25;
 const MAX_BUTTON_URL = 2000;
+
+// Price blanks {{price_1}} … {{price_9}} (whatsappTemplateService.js): Meta
+// approves the wording once, each broadcast types its own prices.
+const PRICE_TAG = /^\{\{price_([1-9])\}\}$/;
+const MAX_VALUE = 30;
+const ANY_TAG = /\{\{[^}]*\}\}/g;
+const bodyTags = (body) => String(body || '').match(ANY_TAG) || [];
+const priceKeys = (body) => bodyTags(body).filter((t) => PRICE_TAG.test(t)).map((t) => t.slice(2, -2));
+const parseValues = (raw) => (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {});
+/** { price_1: '100' } for the body's blanks only, or an error string. */
+function valuesFor(body, raw, what = 'the price') {
+  const given = parseValues(raw);
+  const out = {};
+  for (const key of priceKeys(body)) {
+    const value = String(given[key] ?? '').replace(/[\r\n\t]+/g, ' ').replace(/ {2,}/g, ' ').trim();
+    if (!value) return `Type ${what} for {{${key}}}`;
+    if (value.length > MAX_VALUE) return `{{${key}}} must be ${MAX_VALUE} characters or less`;
+    out[key] = value;
+  }
+  return out;
+}
+const EXAMPLE = "an example price (for Meta's review)";
+const sameJson = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 const DAILY_LIMIT = 250; // Meta's limit for a new (unverified) business number
 const MISSED_AFTER_MS = 6 * 60 * 60 * 1000;
 const NEEDS_APPROVAL = 'Only a message Meta has approved can be scheduled. Save it as a draft for now.';
@@ -171,6 +194,11 @@ function readBroadcast(body = {}, partial = false) {
     if (typeof audience === 'string') return audience;
     out.audience = audience;
   }
+  if (has('template_values')) {
+    const v = body.template_values ?? {};
+    if (typeof v !== 'object' || Array.isArray(v)) return 'template_values must be an object like { price_1: "100" }';
+    out.template_values = v;
+  }
   if (has('scheduled_at')) {
     if (body.scheduled_at === null || body.scheduled_at === '') {
       out.scheduled_at = null;
@@ -189,10 +217,16 @@ function templateTextProblem({ body, footer, button_text: buttonText, button_url
   const text = String(body || '').trim();
   if (!text) return 'body is required';
   if (text.length > MAX_BODY) return `body must be ${MAX_BODY} characters or less`;
-  const tags = text.match(/\{\{[^}]*\}\}/g) || [];
-  if (tags.some((t) => t !== NAME_TAG)) return "body can only use {{name}} for the customer's name";
-  if (tags.length > 1) return 'use {{name}} only once in the body';
-  if (text.startsWith(NAME_TAG) || text.endsWith(NAME_TAG)) return 'Meta does not allow {{name}} at the very start or end of the message';
+  const tags = bodyTags(text);
+  if (tags.some((t) => t !== NAME_TAG && !PRICE_TAG.test(t))) {
+    return "body can only use {{name}} for the customer's name and {{price_1}} … {{price_9}} for prices";
+  }
+  const repeated = tags.find((t, i) => tags.indexOf(t) !== i);
+  if (repeated) return `use ${repeated} only once in the body`;
+  if (/^\{\{[^}]*\}\}/.test(text) || /\{\{[^}]*\}\}$/.test(text)) {
+    return 'Meta does not allow {{name}} or a price blank at the very start or end of the message';
+  }
+  if (/\}\}\s*\{\{/.test(text)) return 'put some words between two blanks (Meta does not allow them side by side)';
   const foot = String(footer || '').trim();
   if (foot.length > MAX_FOOTER) return `footer must be ${MAX_FOOTER} characters or less`;
   if (/\{\{|\}\}/.test(foot)) return "footer can't have {{name}} or other variables";
@@ -241,6 +275,11 @@ function readTemplate(body = {}, partial = false) {
   }
   if (!partial || has('button_text')) out.button_text = String(body.button_text ?? '').trim() || null;
   if (!partial || has('button_url')) out.button_url = String(body.button_url ?? '').trim() || null;
+  if (!partial || has('sample_values')) {
+    const raw = body.sample_values ?? {};
+    if (typeof raw !== 'object' || Array.isArray(raw)) return 'sample_values must be an object like { price_1: "100" }';
+    out.sample_values = raw;
+  }
   return out;
 }
 
@@ -323,6 +362,8 @@ function startBroadcast(d, b) {
   const tpl = b.template_id ? findTemplate(d, b.template_id) : null;
   if (!tpl) throw bad("This broadcast's message template no longer exists. Pick another one.");
   if (tpl.status !== 'approved') throw bad("Meta has not approved this message, so it can't be sent yet.");
+  const values = valuesFor(tpl.body, b.template_values);
+  if (typeof values === 'string') throw bad(`${values} in this broadcast (Drafts & scheduled > Edit).`);
   const { recipients } = resolveAudience(d, b.audience || {});
   if (!recipients.length) throw bad('No customers match this audience, so there is no one to send to.');
 
@@ -421,7 +462,7 @@ function seedBroadcastData(d, h) {
   };
 
   const tpl = (id, fields) => ({
-    id, language: 'en', category: 'MARKETING', footer: 'Reply STOP to opt out', sample_name: DEFAULT_SAMPLE_NAME,
+    id, language: 'en', category: 'MARKETING', footer: 'Reply STOP to opt out', sample_name: DEFAULT_SAMPLE_NAME, sample_values: {},
     button_text: null, button_url: null, status: 'approved', meta_template_id: `9000000000000${id}`,
     rejection_reason: null, created_by: ACTOR, updated_by: ACTOR, is_deleted: 0, ...fields,
   });
@@ -454,6 +495,14 @@ function seedBroadcastData(d, h) {
       status: 'pending', submitted_at: hoursAgo(3), created_at: hoursAgo(3.2), updated_at: hoursAgo(3),
       _demo_hold: true, // stays "in review" so the status is always on show
     }),
+    tpl(7, {
+      name: 'polishing_week_prices',
+      // price blanks: each broadcast types its own prices, no new approval
+      body: 'Hi {{name}}, polishing week at WashDesk Demo! Sedan only {{price_1}} QAR and SUV {{price_2}} QAR, Monday to Wednesday. Book your slot today.',
+      sample_values: { price_1: '300', price_2: '350' },
+      button_text: 'Chat with us', button_url: DEMO_BUTTON_URL,
+      submitted_at: at(3, 11), created_at: at(3, 10, 40), updated_at: at(3, 11),
+    }),
     tpl(6, {
       name: 'free_wash_reminder',
       category: 'UTILITY',
@@ -477,7 +526,7 @@ function seedBroadcastData(d, h) {
   d.broadcast_recipients = [];
   const t = (id) => d.whatsapp_templates.find((x) => x.id === id);
   const base = (id, tplId, title, audience, fields) => ({
-    id, title, template_id: tplId, template_name: t(tplId).name, template_language: 'en', message_body: t(tplId).body,
+    id, title, template_id: tplId, template_name: t(tplId).name, template_language: 'en', message_body: t(tplId).body, template_values: {},
     audience, recipient_count: 0, status: 'draft', scheduled_at: null, sent_at: null,
     sent_count: 0, delivered_count: 0, read_count: 0, failed_count: 0, created_by: ACTOR, last_error: null,
     is_deleted: 0, ...fields,
@@ -641,6 +690,8 @@ r('POST', '/api/v1/broadcast/add', ({ db, body, user }) => {
   const tpl = findTemplate(db, fields.template_id);
   if (!tpl) throw bad('That message template no longer exists');
   if (fields.scheduled_at && tpl.status !== 'approved') throw bad(NEEDS_APPROVAL);
+  const values = valuesFor(tpl.body, fields.template_values);
+  if (typeof values === 'string') throw bad(values);
   const now = nowIso();
   const row = {
     id: nextId('broadcasts'),
@@ -649,6 +700,7 @@ r('POST', '/api/v1/broadcast/add', ({ db, body, user }) => {
     template_name: tpl.name,
     template_language: tpl.language,
     message_body: tpl.body,
+    template_values: values,
     audience: fields.audience,
     recipient_count: resolveAudience(db, fields.audience).count,
     status: fields.scheduled_at ? 'scheduled' : 'draft',
@@ -685,6 +737,11 @@ r('PUT', '/api/v1/broadcast/update/:id', ({ db, params, body }) => {
     Object.assign(fields, { template_name: tpl.name, template_language: tpl.language, message_body: tpl.body });
   }
   if ((fields.status ?? existing.status) === 'scheduled' && tpl?.status !== 'approved') throw bad(NEEDS_APPROVAL);
+  if (tpl) {
+    const values = valuesFor(tpl.body, fields.template_values ?? existing.template_values);
+    if (typeof values === 'string') throw bad(values);
+    fields.template_values = values;
+  }
   if (fields.audience) fields.recipient_count = resolveAudience(db, fields.audience).count;
 
   Object.assign(existing, fields, { updated_at: nowIso() });
@@ -764,6 +821,9 @@ r('POST', '/api/v1/broadcast/templates/add', ({ db, body, user }) => {
   if (typeof fields === 'string') throw bad(fields);
   const problem = templateTextProblem(fields);
   if (problem) throw bad(problem);
+  const samples = valuesFor(fields.body, fields.sample_values, EXAMPLE);
+  if (typeof samples === 'string') throw bad(samples);
+  fields.sample_values = samples;
   if (fields.body.includes(NAME_TAG) && !fields.sample_name) fields.sample_name = DEFAULT_SAMPLE_NAME;
   if (nameTaken(db, fields.name, fields.language)) throw conflict(`A template called ${fields.name} (${fields.language}) already exists`);
 
@@ -792,7 +852,14 @@ r('PUT', '/api/v1/broadcast/templates/update/:id', ({ db, params, body, user }) 
 
   const fields = readTemplate(body || {}, true);
   if (typeof fields === 'string') throw bad(fields);
-  for (const key of Object.keys(fields)) if (fields[key] === existing[key]) delete fields[key];
+  if (fields.sample_values !== undefined || fields.body !== undefined) {
+    const samples = valuesFor(fields.body ?? existing.body, fields.sample_values ?? existing.sample_values, EXAMPLE);
+    if (typeof samples === 'string') throw bad(samples);
+    fields.sample_values = samples;
+  }
+  for (const key of Object.keys(fields)) {
+    if (key === 'sample_values' ? sameJson(fields[key], existing.sample_values || {}) : fields[key] === existing[key]) delete fields[key];
+  }
   if (!Object.keys(fields).length) throw bad('Nothing changed');
   if (existing.submitted_at && (fields.name || fields.language)) {
     throw bad("The name and language can't change after sending to Meta. Create a new template instead.");
@@ -870,5 +937,8 @@ r('POST', '/api/v1/broadcast/templates/test/:id', ({ db, params, body }) => {
   const phone = toWhatsAppNumber(body?.phone);
   if (!phone) throw bad('phone is not a valid WhatsApp number');
   if (!connected(db)) throw notConnected();
+  const typed = body?.values && typeof body.values === 'object' && !Array.isArray(body.values) ? body.values : {};
+  const values = valuesFor(existing.body, { ...(existing.sample_values || {}), ...typed });
+  if (typeof values === 'string') throw bad(values);
   return { success: true, message: `Test sent to +${phone}`, data: { message_id: `wamid.DEMOTEST${Date.now()}`, phone } };
 });
