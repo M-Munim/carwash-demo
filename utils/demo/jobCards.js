@@ -4,8 +4,10 @@
 //
 // Tables in the demo db: customers, customer_vehicles, job_cards,
 // job_card_events (the timeline) and job_card_photos (metadata only).
-// Uploaded photo files stay in memory (`photoFiles`), not in localStorage, so
-// they are gone after a reload (the photo then answers 404, like a missing file).
+// Uploaded photo/video files stay in memory (`photoFiles`), not in localStorage, so
+// they are gone after a reload (the file then answers 404, like a missing file).
+// The customer's inspection page reads them through the same in-memory map, so
+// a file uploaded in one tab shows only in that tab; the sample files show anywhere.
 
 import { route, seeder, httpError, nextId, nowIso } from './core';
 import { SAMPLE_CUSTOMERS, SAMPLE_CARS, insertBooking, formatBooking, logActivity } from './bookings';
@@ -38,6 +40,15 @@ const PAYMENT_TYPES = ['Fawran', 'Paylater', 'Partner Credit'];
 const MAX_PHOTOS_PER_JOB = 30;
 const MAX_PHOTOS_PER_UPLOAD = 6;
 const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+const VIDEO_TYPES = ['video/mp4', 'video/quicktime', 'video/webm'];
+const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
+const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
+/** When a photo/video was taken: check-in (damage) or after the service (the customer's inspection). */
+const PHOTO_STAGES = ['check_in', 'after'];
+const TINT_FILMS = ['Normal Tint', 'Nano Ceramic Tint'];
+const TINT_WINDOWS = ['front_windshield', 'front_side', 'back_side', 'back_windshield'];
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+const INSPECTION_TOKEN = /^[a-f0-9]{48}$/;
 const MAX_SERVICES = 30;
 const DATETIME = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -136,6 +147,8 @@ function formatJob(d, r) {
     qc_by: r.qc_by ?? null,
     qc_at: r.qc_at ?? null,
     invoiced_at: r.invoiced_at ?? null,
+    tint_details: r.tint_details && typeof r.tint_details === 'object' ? r.tint_details : null,
+    inspection_token: r.inspection_token ?? null,
     created_by: r.created_by,
     updated_by: r.updated_by,
     created_at: r.created_at,
@@ -143,7 +156,7 @@ function formatJob(d, r) {
   };
 }
 
-const formatPhoto = (p) => ({ id: p.id, caption: p.caption, file_type: p.file_type, created_by: p.created_by, created_at: p.created_at });
+const formatPhoto = (p) => ({ id: p.id, caption: p.caption, file_type: p.file_type, stage: p.stage || 'check_in', created_by: p.created_by, created_at: p.created_at });
 const photosOf = (d, jobId) => (d.job_card_photos || []).filter((p) => p.job_card_id === jobId).sort((a, b) => a.id - b.id);
 
 /** One job card with its timeline, photos and linked order (getById). */
@@ -219,6 +232,37 @@ function readServices(raw) {
   return out;
 }
 
+/** Window tint + warranty (same checks as readTint in jobCardController.js), or null to clear. */
+function readTint(raw) {
+  if (raw === null || raw === '') return null;
+  if (typeof raw !== 'object' || Array.isArray(raw)) return 'tint_details must be an object or null';
+  const out = {};
+  const film = String(raw.film_brand ?? '').trim();
+  if (film && !TINT_FILMS.includes(film)) return `tint_details.film_brand must be one of: ${TINT_FILMS.join(', ')}`;
+  out.film_brand = film || null;
+  const shades = raw.shades && typeof raw.shades === 'object' ? raw.shades : {};
+  out.shades = {};
+  for (const w of TINT_WINDOWS) {
+    const v = String(shades[w] ?? '').trim().replace(/%$/, '');
+    if (!v) {
+      out.shades[w] = null;
+      continue;
+    }
+    if (!/^\d{1,3}$/.test(v) || Number(v) > 100) return `tint_details.shades.${w} must be a percentage from 0 to 100`;
+    out.shades[w] = Number(v);
+  }
+  const installed = String(raw.installed_on ?? '').trim();
+  if (installed && (!DATE.test(installed) || Number.isNaN(Date.parse(installed)))) return 'tint_details.installed_on must be a date like 2026-11-16';
+  out.installed_on = installed || null;
+  const years = String(raw.warranty_years ?? '5').trim() || '5';
+  if (!/^\d{1,2}$/.test(years) || Number(years) < 1 || Number(years) > 10) return 'tint_details.warranty_years must be from 1 to 10';
+  out.warranty_years = Number(years);
+  const by = jobText(raw.authorized_by, 'tint_details.authorized_by', 100);
+  if (by.error) return by.error;
+  out.authorized_by = by.value;
+  return out;
+}
+
 function readJob(body = {}, partial = false) {
   const out = {};
   const has = (k) => body[k] !== undefined;
@@ -250,6 +294,11 @@ function readJob(body = {}, partial = false) {
     if (raw && !DATETIME.test(raw)) return 'promised_at must be a date and time like 2026-11-12T17:30';
     // Kept as local "YYYY-MM-DD HH:MM:00" so the form's datetime-local reads it back as typed
     out.promised_at = raw ? `${raw.replace('T', ' ').slice(0, 16)}:00` : null;
+  }
+  if (!partial || has('tint_details')) {
+    const t = readTint(body.tint_details ?? null);
+    if (typeof t === 'string') return t;
+    out.tint_details = t;
   }
   return out;
 }
@@ -404,6 +453,14 @@ const JOBS = [
     complaints: 'Coffee stain on the passenger seat. Smell of smoke inside.', promise: 180 },
   { c: 2, minsAgo: 70, status: 'in_progress', services: ['Interior & Exterior Polishing'], tech: 'Sunil', fuel: 'half',
     damage: 'Small dent on the boot lid.', notes: 'Keep the floor mats in the boot', promise: 300 },
+  // window tint: warranty filled in, after-service photos and the customer's link on
+  { c: 3, ago: 1, h: 9, m: 30, status: 'delivered', services: ['Nano Ceramic Tint'], tech: 'Sunil', fuel: 'three_quarters',
+    damage: 'Old tint peeling on the rear windshield.', complaints: 'Wants darker side windows, legal limit.',
+    pay: { payment_method: 'Card', payment_status: 'paid' },
+    tint: { film_brand: 'Nano Ceramic Tint', shades: { front_windshield: 10, front_side: 20, back_side: 50, back_windshield: 10 }, installed_on: null, warranty_years: 5, authorized_by: 'Sunil' },
+    photos: ['Check-in: old tint on rear windshield'],
+    afterPhotos: ['After tint: front view', 'After tint: side windows', 'After tint: rear windshield'],
+    inspectionLink: true },
   { c: 1, v: 1, minsAgo: 20, status: 'open', services: ['Body Polishing'], fuel: 'half',
     damage: 'Scratch on the rear bumper, swirl marks on both front doors.', complaints: 'Wants the scratches polished out if possible.', promise: 240,
     photos: ['Check-in: rear bumper scratch'] },
@@ -491,6 +548,9 @@ seeder(20, (d, h) => {
       damage_notes: spec.damage || null, complaints: spec.complaints || null, services, total: totalOf(services),
       technician: null, status: 'open', promised_at: promised ? localSql(promised) : null, notes: spec.notes || null,
       booking_id: null, qc_checklist: [], qc_by: null, qc_at: null, invoiced_at: null,
+      tint_details: spec.tint || null,
+      // a fixed-looking but random link, so the sample customer page works
+      inspection_token: spec.inspectionLink ? Array.from({ length: 48 }, () => '0123456789abcdef'[r.int(0, 15)]).join('') : null,
       created_by: FRONT_DESK, updated_by: FRONT_DESK, created_at: created.toISOString(), updated_at: created.toISOString(),
     };
     d.job_cards.push(job);
@@ -535,7 +595,13 @@ seeder(20, (d, h) => {
     if (spec.photos) {
       spec.photos.forEach((caption, k) => {
         const pAt = plus(created, 5 + k).toISOString();
-        d.job_card_photos.push({ id: id('job_card_photos'), job_card_id: jobId, file_name: 'sample', file_type: 'image/svg+xml', caption, created_by: FRONT_DESK, created_at: pAt, sample: true, color: vehicle.color });
+        d.job_card_photos.push({ id: id('job_card_photos'), job_card_id: jobId, file_name: 'sample', file_type: 'image/svg+xml', caption, stage: 'check_in', created_by: FRONT_DESK, created_at: pAt, sample: true, color: vehicle.color });
+      });
+    }
+    if (spec.afterPhotos) {
+      spec.afterPhotos.forEach((caption, k) => {
+        const pAt = notAfterNow(plus(t, 1 + k)).toISOString();
+        d.job_card_photos.push({ id: id('job_card_photos'), job_card_id: jobId, file_name: 'sample', file_type: 'image/svg+xml', caption, stage: 'after', created_by: FRONT_DESK, created_at: pAt, sample: true, color: vehicle.color });
       });
     }
   });
@@ -797,7 +863,7 @@ route('POST', '/api/v1/job-cards/add', ({ db, body, user }) => {
     mileage: fields.mileage ?? null, fuel_level: fields.fuel_level ?? null, damage_notes: fields.damage_notes ?? null,
     complaints: fields.complaints ?? null, services, total: totalOf(services), technician: fields.technician ?? null,
     status: 'open', promised_at: fields.promised_at ?? null, notes: fields.notes ?? null, booking_id: null,
-    qc_checklist: [], qc_by: null, qc_at: null, invoiced_at: null,
+    qc_checklist: [], qc_by: null, qc_at: null, invoiced_at: null, tint_details: fields.tint_details ?? null, inspection_token: null,
     created_by: by, updated_by: by, created_at: now, updated_at: now,
   });
   addEvent(db, id, null, 'open', 'Job card created', by, now);
@@ -818,7 +884,11 @@ route('PUT', '/api/v1/job-cards/update/:id', ({ db, params, body, user }) => {
   if (!Object.keys(fields).length) throw bad('No fields provided to update');
   const row = (db.job_cards || []).find((j) => j.id === id);
   if (!row) throw httpError(404, 'Job card not found');
-  if (!OPEN_STATUSES.includes(row.status)) throw httpError(409, `A ${row.status} job card can't be changed`);
+  // the tint/warranty details can still be corrected after delivery (the warranty card is printed then)
+  const onlyWarranty = Object.keys(fields).every((k) => k === 'tint_details');
+  if (!OPEN_STATUSES.includes(row.status) && !(row.status === 'delivered' && onlyWarranty)) {
+    throw httpError(409, `A ${row.status} job card can't be changed`);
+  }
 
   const before = getJob(db, id);
   Object.assign(row, fields);
@@ -932,8 +1002,10 @@ route('POST', '/api/v1/job-cards/:id/photos', ({ db, params, body, files, user }
   const list = files.photos || [];
   // what the upload middleware checks first
   if (list.length > MAX_PHOTOS_PER_UPLOAD) throw bad('Too many files');
-  if (list.some((f) => !PHOTO_TYPES.includes(f.type))) throw bad('Unsupported file type. Allowed: JPG, PNG, WEBP.');
-  if (list.some((f) => f.size > 10 * 1024 * 1024)) throw bad('File too large');
+  if (list.some((f) => !PHOTO_TYPES.includes(f.type) && !VIDEO_TYPES.includes(f.type))) {
+    throw bad('Unsupported file type. Allowed: JPG, PNG, WEBP photos and MP4, MOV, WEBM videos.');
+  }
+  if (list.some((f) => f.size > MAX_VIDEO_BYTES)) throw httpError(413, 'A file is too large. The maximum is 10 MB per photo and 50 MB per video.');
 
   const id = validId(params.id);
   const job = id && (db.job_cards || []).find((j) => j.id === id);
@@ -941,26 +1013,96 @@ route('POST', '/api/v1/job-cards/:id/photos', ({ db, params, body, files, user }
   if (!list.length) throw bad('Choose at least one photo');
   const caption = jobText(body?.caption, 'caption', 150);
   if (caption.error) throw bad(caption.error);
+  const stage = body?.stage || 'check_in';
+  if (!PHOTO_STAGES.includes(stage)) throw bad(`stage must be one of: ${PHOTO_STAGES.join(', ')}`);
+  if (list.some((f) => PHOTO_TYPES.includes(f.type) && f.size > MAX_PHOTO_BYTES)) throw httpError(413, 'A photo is too large. The maximum is 10 MB per photo.');
   const have = photosOf(db, id).length;
-  if (have + list.length > MAX_PHOTOS_PER_JOB) throw bad(`A job card can have at most ${MAX_PHOTOS_PER_JOB} photos (it has ${have})`);
+  if (have + list.length > MAX_PHOTOS_PER_JOB) throw bad(`A job card can have at most ${MAX_PHOTOS_PER_JOB} photos and videos (it has ${have})`);
 
   const now = nowIso();
   list.forEach((file) => {
     const photoId = nextId('job_card_photos');
     photoFiles.set(photoId, file);
-    db.job_card_photos.push({ id: photoId, job_card_id: id, file_name: 'upload', file_type: file.type, caption: caption.value, created_by: actor(user), created_at: now });
+    db.job_card_photos.push({ id: photoId, job_card_id: id, file_name: 'upload', file_type: file.type, caption: caption.value, stage, created_by: actor(user), created_at: now });
   });
-  logActivity(db, user, { action: 'job_card.photos', entity: 'job_card', new_values: { id, job_number: job.job_number, added: list.length, caption: caption.value } });
-  return { status: 201, data: { success: true, message: `${list.length} photo${list.length === 1 ? '' : 's'} added`, data: photosOf(db, id).map(formatPhoto) } };
+  logActivity(db, user, { action: 'job_card.photos', entity: 'job_card', new_values: { id, job_number: job.job_number, added: list.length, caption: caption.value, stage } });
+  return { status: 201, data: { success: true, message: `${list.length} file${list.length === 1 ? '' : 's'} added`, data: photosOf(db, id).map(formatPhoto) } };
 });
+
+/** The file behind a photo row: a drawn sample, or an upload kept in this tab's memory. */
+function photoFile(photo) {
+  if (photo.sample) return sampleCarSvg(photo.caption, photo.color);
+  return photoFiles.get(photo.id) || null;
+}
 
 route('GET', '/api/v1/job-cards/photo/:photoId', ({ db, params }) => {
   const id = validId(params.photoId);
   const photo = id && (db.job_card_photos || []).find((p) => p.id === id);
   if (!photo) throw httpError(404, 'Photo not found');
-  if (photo.sample) return { status: 200, data: sampleCarSvg(photo.caption, photo.color) };
-  const file = photoFiles.get(id);
+  const file = photoFile(photo);
   if (!file) throw httpError(404, 'The photo file is missing on the server');
+  return { status: 200, data: file };
+});
+
+// ── the customer's inspection link (jobCardController.inspectionLink …) ──
+const newToken = () => {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+};
+
+route('POST', '/api/v1/job-cards/inspection-link/:id', ({ db, params, user }) => {
+  const id = validId(params.id);
+  const row = id && (db.job_cards || []).find((j) => j.id === id);
+  if (!row) throw httpError(404, 'Job card not found');
+  if (row.status === 'cancelled') throw httpError(409, 'This job card is cancelled');
+  if (!photosOf(db, id).some((p) => p.stage === 'after')) throw bad('Add the after-service photos or videos first');
+  if (!row.inspection_token) {
+    row.inspection_token = newToken();
+    logActivity(db, user, { action: 'job_card.inspection_link', entity: 'job_card', new_values: { id, job_number: row.job_number, link: 'on' } });
+  }
+  return { success: true, message: 'Inspection link ready', data: { token: row.inspection_token } };
+});
+
+route('PUT', '/api/v1/job-cards/inspection-link/delete/:id', ({ db, params, user }) => {
+  const id = validId(params.id);
+  const row = id && (db.job_cards || []).find((j) => j.id === id);
+  if (!row) throw httpError(404, 'Job card not found');
+  row.inspection_token = null;
+  logActivity(db, user, { action: 'job_card.inspection_link', entity: 'job_card', new_values: { id, job_number: row.job_number, link: 'off' } });
+  return { success: true, message: 'Inspection link turned off' };
+});
+
+const jobByToken = (db, token) =>
+  (INSPECTION_TOKEN.test(String(token || '')) && (db.job_cards || []).find((j) => j.inspection_token === token && j.status !== 'cancelled')) || null;
+
+// Public (no login): what the customer sees. No phone number, price or staff notes.
+route('GET', '/api/v1/public/inspection/:token', ({ db, params }) => {
+  const row = jobByToken(db, params.token);
+  if (!row) throw httpError(404, 'This link is not valid any more');
+  const job = formatJob(db, row);
+  return {
+    success: true,
+    message: 'Inspection',
+    data: {
+      job_number: job.job_number,
+      customer_name: String(job.customer.name || '').trim().split(/\s+/)[0] || null,
+      vehicle: { plate: job.vehicle.plate, make: job.vehicle.make, model: job.vehicle.model, color: job.vehicle.color, year: job.vehicle.year },
+      services: job.services.map((x) => x.name),
+      checked_at: job.qc_at || job.updated_at,
+      media: photosOf(db, row.id).filter((p) => p.stage === 'after').map((p) => ({
+        id: p.id, kind: String(p.file_type).startsWith('video/') ? 'video' : 'photo', caption: p.caption, created_at: p.created_at,
+      })),
+    },
+  };
+});
+
+route('GET', '/api/v1/public/inspection/:token/media/:mediaId', ({ db, params }) => {
+  const row = jobByToken(db, params.token);
+  const mediaId = validId(params.mediaId);
+  const photo = row && mediaId && photosOf(db, row.id).find((p) => p.id === mediaId && p.stage === 'after');
+  const file = photo && photoFile(photo);
+  if (!file) throw httpError(404, 'Not found');
   return { status: 200, data: file };
 });
 
