@@ -141,14 +141,19 @@ seeder(10, (d) => {
     const p = (n) => String(n).padStart(2, '0');
     return { day: `${t.getFullYear()}-${p(t.getMonth() + 1)}-${p(t.getDate())}`, time: `${p(t.getHours())}:${p(t.getMinutes())}` };
   };
-  // A small sample: one order from yesterday and three in the shop now
+  // A small sample: one order left open two days ago (staff forgot to close it,
+  // so Car Wash Orders and Day Close flag it), one from yesterday and three in the shop now
   // (a fifth order comes from the delivered job card). [customer index or -1 for
   // a walk-in, services, stage, payment status, method, when]
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
   yesterday.setHours(10, 20, 0, 0);
+  const twoDaysAgo = new Date();
+  twoDaysAgo.setDate(twoDaysAgo.getDate() - 2);
+  twoDaysAgo.setHours(17, 45, 0, 0);
   const minsAgo = (n) => new Date(Date.now() - n * 60000);
   const ORDERS = [
+    [1, [WASH], 'waiting', 'paid', 'Cash', twoDaysAgo, 'walk-in'],
     [0, [WASH], 'collected', 'paid', 'Card', yesterday, 'walk-in'],
     [2, [WASH, 'Glass Polish'], 'ready', 'unpaid', 'Card', minsAgo(95), 'kiosk'],
     [3, [WASH], 'washing', 'paid', 'Cash', minsAgo(40), 'walk-in'],
