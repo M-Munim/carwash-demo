@@ -13,8 +13,8 @@
 
 import { AxiosError } from 'axios';
 
-// v3: job cards with tint warranty and inspection photos (older saves are ignored).
-const STORAGE_KEY = 'washdesk-demo-db-v4';
+// v5: customer wallets (older saves are ignored).
+const STORAGE_KEY = 'washdesk-demo-db-v5';
 const RESET_AT_KEY = 'washdesk-demo-reset-at';
 /** How long a visitor's changes stay before the sample data comes back. */
 export const CHANGE_TTL_MS = 60 * 60 * 1000; // 1 hour
