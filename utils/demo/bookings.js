@@ -3,6 +3,7 @@
 
 import { route, seeder, httpError, nextId, nowIso, dateOnly, isoAt, paginate, getDb } from './core';
 import { SERVICE_GROUPS, TOKEN_LETTERS, EXTRAS_TOKEN_LETTER, servicesPrice } from '../priceList';
+import { walletPaidFor, returnOrderPayment } from './wallet';
 
 // ── sample people ───────────────────────────────────────────
 export const SAMPLE_CUSTOMERS = [
@@ -269,6 +270,21 @@ route('POST', '/api/v1/booking/update-status', ({ db, body }) => {
 route('PUT', '/api/v1/booking/update-booking/:id', ({ db, params, body, user }) => {
   const b = live(db).find((x) => String(x.id) === params.id);
   if (!b) throw httpError(404, 'Booking not found');
+  // Wallet payments change only through /wallet/pay and /wallet/undo-payment (as on the backend)
+  const walletPaid = walletPaidFor(db, b.id).paid;
+  const sent = body || {};
+  if (sent.payment_method === 'Wallet' && !walletPaid) {
+    throw httpError(400, 'To pay from the wallet use Pay from wallet, so the balance is taken.', { code: 'use_wallet_pay' });
+  }
+  if (walletPaid > 0) {
+    const lower = (v) => String(v ?? '').trim().toLowerCase();
+    const unpays = (sent.payment_status !== undefined && lower(sent.payment_status) !== 'paid')
+      || (sent.payment_method !== undefined && sent.payment_method !== 'Wallet')
+      || (sent.price !== undefined && Number(sent.price) !== Number(b.price));
+    if (unpays) {
+      throw httpError(409, `This order is paid from the wallet (QAR ${walletPaid}). Undo the wallet payment first.`, { code: 'wallet_paid' });
+    }
+  }
   const old = {};
   Object.entries(body || {}).forEach(([k, v]) => {
     if (['id', 'booking_number', 'tokens', 'created_at'].includes(k)) return;
@@ -290,6 +306,11 @@ route('PUT', '/api/v1/booking/update-booking/:id', ({ db, params, body, user }) 
 route('PUT', '/api/v1/booking/delete-booking/:id', ({ db, params, body, user }) => {
   const b = live(db).find((x) => String(x.id) === params.id);
   if (!b) throw httpError(404, 'Booking not found');
+  // A wallet-paid order: its payment goes back to the wallet as it is deleted
+  let returned = 0;
+  if (walletPaidFor(db, b.id).paid > 0) {
+    returned = returnOrderPayment(db, b, { unpaid: false, note: `Order deleted${body?.reason ? `: ${body.reason}` : ''}`.slice(0, 255) }, user?.username || null).returned;
+  }
   b.is_deleted = 1;
   logActivity(db, user, {
     action: 'booking.delete',
@@ -297,7 +318,9 @@ route('PUT', '/api/v1/booking/delete-booking/:id', ({ db, params, body, user }) 
     old_values: formatBooking(b),
     new_values: { reason: body?.reason || null },
   });
-  return { success: true, message: 'Booking deleted' };
+  return returned
+    ? { success: true, message: `Booking deleted. QAR ${returned} returned to the wallet.`, wallet_returned: returned }
+    : { success: true, message: 'Booking deleted' };
 });
 
 // Receipt PDF: kept in this browser as a data link (no file server in the demo).

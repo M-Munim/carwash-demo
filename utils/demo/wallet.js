@@ -142,3 +142,85 @@ route('POST', '/api/v1/wallet/refund', ({ db, body = {}, user }) => {
   addTransaction(db, wallet, { type: 'refund', amount: -amount.value, payment_method: body.payment_method, note }, user?.username || null);
   return { success: true, message: 'Balance refunded', data: formatWallet(wallet) };
 });
+
+// ── paying orders from the wallet (phase 2) ─────────────────
+const WALLET_METHOD = 'Wallet';
+const isPaid = (b) => String(b.payment_status || b.status || '').toLowerCase() === 'paid';
+
+/** Net wallet payment of an order (payments minus reversals) and the wallet it came from. */
+export function walletPaidFor(db, bookingId) {
+  ensureTables(db);
+  const byWallet = new Map();
+  db.wallet_transactions
+    .filter((t) => String(t.booking_id) === String(bookingId) && (t.type === 'payment' || t.type === 'reversal'))
+    .forEach((t) => byWallet.set(t.wallet_id, round2((byWallet.get(t.wallet_id) || 0) - Number(t.amount))));
+  const entry = [...byWallet.entries()].find(([, paid]) => paid > 0);
+  return { paid: entry ? entry[1] : 0, walletId: entry ? entry[0] : null };
+}
+
+/** Gives a wallet payment back (used by Undo and when a wallet-paid order is deleted). */
+export function returnOrderPayment(db, booking, { note = null, unpaid = true } = {}, actor = null) {
+  const { paid, walletId } = walletPaidFor(db, booking.id);
+  if (!(paid > 0)) throw httpError(409, `Order #${booking.booking_number} was not paid from the wallet`);
+  const wallet = db.wallets.find((w) => w.id === walletId);
+  addTransaction(db, wallet, { type: 'reversal', amount: paid, booking_id: booking.id, note: note || `Order #${booking.booking_number}` }, actor);
+  if (unpaid) {
+    booking.payment_status = 'unpaid';
+    booking.payment_method = null;
+  }
+  return { wallet: formatWallet(wallet), returned: paid, booking_number: booking.booking_number };
+}
+
+const findOrder = (db, id) => {
+  const bookingId = Number(id);
+  if (!Number.isInteger(bookingId) || bookingId < 1) throw bad('booking_id is required');
+  const b = db.bookings.find((x) => x.id === bookingId && !x.is_deleted);
+  if (!b) throw httpError(404, 'Order not found');
+  return b;
+};
+
+route('POST', '/api/v1/wallet/pay', ({ db, body = {}, user }) => {
+  ensureTables(db);
+  const booking = findOrder(db, body.booking_id);
+  if (isPaid(booking)) throw httpError(409, `Order #${booking.booking_number} is already paid`);
+  const total = round2(booking.price);
+  if (!(total > 0)) throw bad(`Order #${booking.booking_number} has no amount to pay`);
+  const phone = normalizePhone(booking.contact_number);
+  if (!phone) throw bad('This order has no customer phone number, so it has no wallet');
+  const wallet = db.wallets.find((w) => w.phone === phone);
+  if (!wallet) throw httpError(404, 'This customer has no wallet. Add balance first.');
+  if (Number(wallet.balance) < total) {
+    throw bad(`The wallet has QAR ${round2(wallet.balance)}, less than the order total QAR ${total}. Add balance first.`);
+  }
+  addTransaction(db, wallet, { type: 'payment', amount: -total, booking_id: booking.id, note: `Order #${booking.booking_number}` }, user?.username || null);
+  booking.payment_status = 'paid';
+  booking.payment_method = WALLET_METHOD;
+  booking.updated_at = nowIso();
+  return { success: true, message: 'Paid from the wallet', data: { wallet: formatWallet(wallet), paid: total, booking_number: booking.booking_number } };
+});
+
+route('POST', '/api/v1/wallet/undo-payment', ({ db, body = {}, user }) => {
+  ensureTables(db);
+  const booking = findOrder(db, body.booking_id);
+  const data = returnOrderPayment(db, booking, {}, user?.username || null);
+  return { success: true, message: 'Payment returned to the wallet', data };
+});
+
+route('GET', '/api/v1/wallet/transactions', ({ db, query = {} }) => {
+  ensureTables(db);
+  const day = /^\d{4}-\d{2}-\d{2}$/;
+  const from = String(query.from || '');
+  const to = String(query.to || from);
+  if (!day.test(from) || !day.test(to)) throw bad('from and to must be YYYY-MM-DD');
+  if (to < from) throw bad("to can't be before from");
+  // A day wider each side, like the backend; the page keeps its own local days
+  const lo = new Date(`${from}T00:00:00Z`).getTime() - 86400000;
+  const hi = new Date(`${to}T00:00:00Z`).getTime() + 2 * 86400000;
+  const data = db.wallet_transactions
+    .filter((t) => { const at = new Date(t.created_at).getTime(); return at >= lo && at < hi; })
+    .map((t) => {
+      const w = db.wallets.find((x) => x.id === t.wallet_id);
+      return { ...t, phone: w?.phone, name: w?.name };
+    });
+  return { success: true, message: 'Wallet transactions', data };
+});
